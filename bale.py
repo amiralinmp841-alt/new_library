@@ -8,9 +8,6 @@ import io as iolib
 import asyncio
 import requests
 from datetime import datetime
-import tempfile
-import os
-import requests
 
 from storage import (
     DB_FILE,
@@ -25,10 +22,6 @@ from storage import (
 BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
 BALE_BOT_USERNAME = os.getenv("BALE_BOT_USERNAME", "")
 ADMIN_ACCESSIBILITY_NAME = os.getenv("ADMIN_ACCESSIBILITY_NAME")
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-TELEGRAM_BACKUP_CHAT_ID = os.getenv("TELEGRAM_BACKUP_CHAT_ID")
 
 BALE_ADMIN_IDS = []
 if os.getenv("BALE_ADMIN_IDS"):
@@ -273,137 +266,44 @@ def cancel_keyboard():
 
 
 # ================= CONTENT SENDER =================
-
-# در bale.py اضافه کن/جایگزین کن
-
 import io
 
-from storage import upload_bytes_to_telegram, download_bytes_from_telegram
+# در bale.py، حتماً توابع جدید را import کنید:
+from storage import upload_file_to_telegram_BALE, download_file_from_telegram
 
-# ۱. اصلاح تابع ارسال به بله (دریافت از تلگرام، ارسال به بله)
 async def send_file_to_bale(chat_id, file_type, file_id, caption=""):
-    # دانلود بایت‌ها از تلگرام با استفاده از file_id
-    file_bytes = await asyncio.to_thread(download_bytes_from_telegram, file_id)
+    """
+    دانلود فایل از تلگرام با استفاده از file_id و ارسال به بله.
+    """
+    # ۱. دانلود بایت‌ها از تلگرام
+    file_bytes = await asyncio.to_thread(download_file_from_telegram, file_id)
     
     if not file_bytes:
         await send_message(chat_id, "❌ خطا در دریافت فایل از تلگرام.")
-        return
+        return False
 
-    # ارسال به بله
-    await send_document(
-        chat_id=chat_id,
-        file_bytes=file_bytes,
-        filename="file.dat",
-        caption=caption
-    )
-
-# ۲. اصلاح تابع ثبت محتوا (دریافت از بله، آپلود در تلگرام، گرفتن file_id)
-async def handle_waiting_content(chat_id, user_id, text, session, message):
-    admin = is_admin(user_id)
-
-    if text == "❌ لغو":
-        # ... (کد قبلی خودت رو اینجا بذار)
-        return
-
-    if text == "✅ ثبت نهایی":
-        # ... (کد قبلی خودت رو اینجا بذار)
-        return
-
-    if text and not text.startswith("/"):
-        # ... (کد متنی قبلی)
-        return
-
-    # هندل کردن فایل
-    file_info = message.get("document") or (message.get("photo")[-1] if message.get("photo") else None)
-
-    if file_info:
-        # ۱. گرفتن فایل از بله
-        file_id_bale = file_info['file_id']
-        file_url = f"{BALE_API_URL}/getFile?file_id={file_id_bale}"
-        
-        try:
-            file_path_bale = requests.get(file_url).json()["result"]["file_path"]
-            download_url = f"https://tapi.bale.ai/file/bot{BALE_BOT_TOKEN}/{file_path_bale}"
-            file_bytes = await asyncio.to_thread(lambda: requests.get(download_url).content)
-        except Exception as e:
-            await send_message(chat_id, "❌ خطا در دریافت فایل از بله.")
-            return
-
-        # ۲. آپلود به تلگرام و گرفتن file_id
-        new_telegram_file_id = await asyncio.to_thread(
-            upload_bytes_to_telegram,
-            file_bytes,
-            filename="file.dat",
-            caption=message.get('caption', '')
-        )
-        
-        if new_telegram_file_id:
-            # ۳. ذخیره در دیتابیس
-            content_data = {
-                'type': 'document',
-                'file_id': new_telegram_file_id, 
-                'caption': message.get('caption', '')
-            }
-            session.setdefault("temp_content", []).append(content_data)
-            await send_message(chat_id, "✅ فایل در تلگرام ذخیره شد.")
-        else:
-            await send_message(chat_id, "❌ خطا در آپلود فایل به تلگرام.")
-        return
+    # ۲. ارسال به بله (Multipart)
+    payload = {"chat_id": str(chat_id), "caption": caption}
+    files = {file_type: ("file", file_bytes)} 
+    
+    # متد ارسال بر اساس نوع فایل (مثلا sendDocument یا sendPhoto)
+    await bale_api(f"send{file_type.capitalize()}", payload=payload, files=files)
+    return True
 
 
+# حالا تابع send_node_contents را اینطوری آپدیت کن:
 async def send_node_contents(chat_id, node_id):
     db = load_db()
-    node = db["nodes"].get(node_id)
-    if not node:
-        return
+    contents = db[node_id].get("contents", [])
+    
+    for item in contents:
+        msg_type = item['type']
+        if msg_type == 'text':
+            await send_message(chat_id, item['text'], parse_mode="HTML")
+        else:
+            # اینجا جادوی اصلی اتفاق می‌افتد:
+            await send_file_to_bale(chat_id, msg_type, item['file_id'], item.get('caption', ''))
 
-    # ✅ متن
-    if node.get("text"):
-        await send_message(chat_id, node["text"])
-
-    # ✅ فایل‌ها
-    for file_item in node.get("files", []):
-        await send_file_to_bale(
-            chat_id=chat_id,
-            file_type=file_item.get("type"),
-            file_id=file_item.get("file_id"),
-            caption=file_item.get("caption", "")
-        )
-
-
-async def download_from_telegram(file_id):
-    """
-    Downloads a file from Telegram using Bot API file_id.
-    Returns (file_bytes, filename)
-    """
-
-    # 1️⃣ getFile
-    res = await asyncio.to_thread(
-        requests.get,
-        f"{TELEGRAM_API_URL}/getFile",
-        params={"file_id": file_id}
-    )
-
-    data = res.json()
-    if not data.get("ok"):
-        print("Telegram getFile error:", data)
-        return None, None
-
-    file_path = data["result"]["file_path"]
-
-    # 2️⃣ Download actual file
-    file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
-
-    file_res = await asyncio.to_thread(requests.get, file_url)
-
-    if file_res.status_code != 200:
-        print("Telegram file download failed")
-        return None, None
-
-    file_bytes = file_res.content
-    filename = os.path.basename(file_path)
-
-    return file_bytes, filename
 
 # ================= START =================
 
@@ -432,7 +332,7 @@ async def bale_start(chat_id, user_id, args=None):
 
     await send_message(
         chat_id,
-        "🕊 به ربات دانشگاه خوش آمدید. (نسخه بله)v_1_1_4",
+        "🕊 به ربات دانشگاه خوش آمدید. (نسخه بله)v_1_1_2",
         keyboard=get_bale_keyboard("root", admin)
     )
 
@@ -579,6 +479,51 @@ async def handle_waiting_button_name(chat_id, user_id, text, session):
         keyboard=get_bale_keyboard(current_node_id, True)
     )
 
+
+async def handle_waiting_content(chat_id, user_id, text, session, message):
+    admin = is_admin(user_id)
+
+    # ... (کدهای لغو و ثبت نهایی مثل قبل) ...
+
+    # هندل کردن فایل (اگر پیام شامل فایل باشد)
+    file_info = None
+    f_type = None
+
+    if "document" in message:
+        file_info = message["document"]
+        f_type = "document"
+    elif "photo" in message:
+        file_info = message["photo"][-1]
+        f_type = "photo"
+
+    if file_info:
+        # ۱. دریافت فایل از سرور بله
+        file_url = f"{BALE_API_URL}/getFile?file_id={file_info['file_id']}"
+        resp = requests.get(file_url).json()
+        file_path_bale = resp["result"]["file_path"]
+        
+        download_url = f"https://tapi.bale.ai/file/bot{BALE_BOT_TOKEN}/{file_path_bale}"
+        file_bytes = await asyncio.to_thread(lambda: requests.get(download_url).content)
+        
+        # ۲. آپلود به تلگرام و گرفتن file_id
+        new_telegram_file_id = await asyncio.to_thread(
+            upload_file_to_telegram_BALE, 
+            file_bytes, 
+            message.get('caption', '')
+        )
+        
+        if new_telegram_file_id:
+            # ۳. ذخیره در دیتابیس (فقط و فقط file_id)
+            content_data = {
+                'type': f_type,
+                'file_id': new_telegram_file_id, 
+                'caption': message.get('caption', '')
+            }
+            session.setdefault("temp_content", []).append(content_data)
+            await send_message(chat_id, "✅ فایل آپلود و آیدی آن در دیتابیس ذخیره شد.")
+        else:
+            await send_message(chat_id, "❌ خطا در آپلود فایل به تلگرام.")
+        return
 
 
 async def handle_waiting_rename_button(chat_id, user_id, text, session):
@@ -1268,7 +1213,6 @@ async def handle_bale_navigation(chat_id, user_id, text, message):
 
 
 # ================= UPDATE ENTRYPOINT =================
-
 async def handle_bale_update(update: dict):
     """
     این تابع از main.py صدا زده می‌شود:
@@ -1291,19 +1235,8 @@ async def handle_bale_update(update: dict):
 
     text = message.get("text") or ""
 
-    # اگر متن نبود، فعلاً فقط پیام راهنما بده
-    # بعداً فایل‌های بله را اینجا هندل می‌کنیم.
-    if not text:
-        session = get_session(user_id)
-        if session.get("state") == WAITING_CONTENT:
-            await send_message(
-                chat_id,
-                "📎 فایل دریافت شد، اما ذخیره فایل در بله هنوز فعال نشده است.\n"
-                "فعلاً متن ارسال کنید یا ✅ ثبت نهایی را بزنید."
-            )
-        return
-
-    text = text.strip()
+    if tex:
+        text = text.strip()
 
     # /start یا /start payload
     if text.startswith("/start"):
@@ -1325,4 +1258,5 @@ async def handle_bale_update(update: dict):
         )
         return
 
-    await handle_bale_navigation(chat_id, user_id, text, message)
+    # مهم: کل message پاس داده می‌شود تا فایل‌ها هم هندل شوند
+    await handle_bale_navigation
