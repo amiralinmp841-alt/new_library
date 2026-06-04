@@ -1486,32 +1486,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 
-async def send_daily_backup(context: ContextTypes.DEFAULT_TYPE):
-    backup_id = os.getenv("BACKUP_ID")
-    if not backup_id:
-        return
-
-    backup_id = int(backup_id)
-
-    if not os.path.exists(DB_FILE):
-        return
-
-    mem_zip = iolib.BytesIO()
-    with zipfile.ZipFile(mem_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(DB_FILE)
-
-    mem_zip.seek(0)
-
-    await context.bot.send_document(
-        chat_id=backup_id,
-        document=InputFile(
-            mem_zip,
-            filename=f"backup_{datetime.now().strftime('%Y%m%d')}.zip"
-        ),
-        caption="📦 بکاپ اتوماتیک دیتابیس"
-    )
-
-
 # ======== BUILD APPLICATION ========  ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ========
 def build_application():
 
@@ -1525,13 +1499,6 @@ def build_application():
             not_started
         ),
         group=0
-    )
-
-    # ⏱ بکاپ اتوماتیک
-    application.job_queue.run_repeating(
-        send_daily_backup,
-        interval=8 * 60 * 60,
-        first=10
     )
 
     # ConversationHandler
