@@ -1,109 +1,51 @@
 import os
-from balepy import Bot, Keyboard, ReplyMarkup
-from storage import load_db, download_by_message_id, DB_BACKUP_CHAT_ID
+import logging
+import aiohttp
 
-bot = Bot(token=os.getenv("BALE_BOT_TOKEN"))
-BALE_ADMINS = [int(x) for x in os.getenv("BALE_ADMIN_IDS", "").split(",") if x]
+BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
 
-# ذخیره وضعیت کاربران
-user_states = {}
+BALE_API_BASE = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}"
 
-def get_bale_keyboard(node_id):
-    db = load_db()
-    node = db.get(node_id)
-    if not node: return None
 
-    buttons = []
-    # دکمه‌های فرزند (پوشه‌ها)
-    for child_id in node.get("children", []):
-        child_node = db.get(child_id)
-        if child_node:
-            buttons.append([child_node["name"]])
-    
-    # دکمه‌های بازگشت
-    nav_row = []
-    if node.get("parent"):
-        nav_row.append("🔙 بازگشت")
-    nav_row.append("🏠 صفحه اصلی")
-    buttons.append(nav_row)
-    
-    return ReplyMarkup(buttons)
+async def bale_api(method: str, payload: dict):
+    url = f"{BALE_API_BASE}/{method}"
 
-async def send_contents(message, node_id):
-    db = load_db()
-    contents = db.get(node_id, {}).get("contents", [])
-    
-    if not contents:
-        await message.reply("این بخش خالی است.")
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                logging.error(f"Bale API error {resp.status}: {text}")
+            return text
+
+
+async def send_bale_message(chat_id, text, reply_markup=None):
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
+    return await bale_api("sendMessage", payload)
+
+
+async def handle_bale_update(data: dict):
+    logging.info(f"Bale update: {data}")
+
+    message = data.get("message")
+    if not message:
         return
 
-    for item in contents:
-        try:
-            # دانلود از تلگرام (بکاپ)
-            # فرض بر این است که download_by_message_id در storage.py خروجی درست می‌دهد
-            file_path = f"/tmp/{item.get('telegram_message_id', 'temp_file')}"
-            await download_by_message_id(DB_BACKUP_CHAT_ID, item.get('telegram_message_id'), file_path)
+    chat = message.get("chat", {})
+    chat_id = chat.get("id")
 
-            msg_type = item.get('type')
-            caption = item.get('caption', '')
+    text = message.get("text", "")
 
-            if msg_type == 'text':
-                await message.reply(item.get('text', ''))
-            elif msg_type == 'photo':
-                await message.reply_photo(photo=file_path, caption=caption)
-            elif msg_type == 'video':
-                await message.reply_video(video=file_path, caption=caption)
-            elif msg_type == 'document':
-                await message.reply_document(document=file_path, caption=caption)
-            elif msg_type == 'audio':
-                await message.reply_audio(audio=file_path, caption=caption)
-            elif msg_type == 'voice':
-                await message.reply_voice(voice=file_path, caption=caption)
-            
-            # پاک کردن فایل موقت
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except Exception as e:
-            print(f"Error sending file: {e}")
-
-@bot.on_command("start")
-async def start(message):
-    user_states[message.author.id] = "root"
-    await message.reply("سلام! به ربات خوش آمدید.", reply_markup=get_bale_keyboard("root"))
-
-@bot.on_message()
-async def navigation(message):
-    user_id = message.author.id
-    text = message.text
-    db = load_db()
-    current_node = user_states.get(user_id, "root")
-    
-    # 1. منطق بازگشت
-    if text == "🏠 صفحه اصلی":
-        user_states[user_id] = "root"
-        await message.reply("به صفحه اصلی برگشتید.", reply_markup=get_bale_keyboard("root"))
+    if not chat_id:
         return
 
-    if text == "🔙 بازگشت":
-        parent = db.get(current_node, {}).get("parent")
-        if parent:
-            user_states[user_id] = parent
-            await message.reply("بازگشت...", reply_markup=get_bale_keyboard(parent))
-            await send_contents(message, parent)
-        return
-
-    # 2. بررسی کلیک روی دکمه‌های فرزند
-    node = db.get(current_node, {})
-    children = node.get("children", [])
-    
-    for child_id in children:
-        child_node = db.get(child_id)
-        if child_node and child_node["name"] == text:
-            user_states[user_id] = child_id
-            await message.reply(f"📂 {text}", reply_markup=get_bale_keyboard(child_id))
-            await send_contents(message, child_id)
-            return
-
-    await message.reply("دستور نامعتبر.")
-
-bot.run()
+    if text == "/start":
+        await send_bale_message(chat_id, "سلام، ربات بله وصل شد ✅")
+    else:
+        await send_bale_message(chat_id, f"پیام شما دریافت شد:\n{text}")
