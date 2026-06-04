@@ -1235,7 +1235,7 @@ async def handle_bale_update(update: dict):
 
     text = message.get("text") or ""
 
-    if tex:
+    if text:
         text = text.strip()
 
     # /start یا /start payload
@@ -1259,4 +1259,4 @@ async def handle_bale_update(update: dict):
         return
 
     # مهم: کل message پاس داده می‌شود تا فایل‌ها هم هندل شوند
-    await handle_bale_navigation
+    await handle_bale_navigation(chat_id, user_id, text, message)
