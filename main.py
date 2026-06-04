@@ -490,7 +490,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["current_node"] = "root"
 
     await update.message.reply_text(
-        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.2.17)",
+        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.2.18)",
         reply_markup=get_keyboard("root", is_admin)
     )
 
@@ -1451,7 +1451,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ✅ نوشتن دیتابیس
             with open(DB_FILE, "wb") as f:
                 f.write(zf.read(db_name))
-            upload_db_to_supabase()
+            upload_db_to_telegram()
 
         # 🔥 پاک کردن لاگ تغییرات ادمین
         context.user_data.pop("admin_history", None)
