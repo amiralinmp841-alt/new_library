@@ -288,39 +288,45 @@ def save_userdata(data):
 
 BACKUP_FILE = "/tmp/backup_database.zip"
 
-# این توابع را به انتهای storage.py اضافه کن
+# ============ BALE FILE DOWN/UP ============
 import requests
 
-def upload_bytes_to_telegram(file_bytes, filename="file.bin", caption=""):
-    """فایل را به صورت بایت می‌گیرد، به تلگرام آپلود می‌کند و file_id را برمی‌گرداند"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
-    files = {"document": (filename, file_bytes)}
+# مطمئن شوید TELEGRAM_BOT_TOKEN در فایل کانفیگ یا انوایرمنت شما تعریف شده است
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") 
+TG_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+def upload_file_to_telegram_BALE(file_bytes, caption=""):
+    """
+    فایل را با بایت‌ها به تلگرام می‌فرستد و file_id را می‌گیرد.
+    """
+    url = f"{TG_API_URL}/sendDocument"
+    # از chat_id که برای بکاپ دارید استفاده کنید (مثلا همان DB_BACKUP_CHAT_ID)
     data = {"chat_id": DB_BACKUP_CHAT_ID, "caption": caption}
+    files = {"document": ("file.dat", file_bytes)}
     
     try:
-        response = requests.post(url, files=files, data=data, timeout=30).json()
+        response = requests.post(url, data=data, files=files, timeout=30).json()
         if response.get("ok"):
             return response["result"]["document"]["file_id"]
     except Exception as e:
-        print(f"❌ Error uploading to Telegram: {e}")
+        print(f"Error uploading to Telegram: {e}")
     return None
 
-def download_bytes_from_telegram(file_id):
-    """file_id را می‌گیرد و بایت‌های فایل را از تلگرام دانلود می‌کند"""
-    # ۱. دریافت آدرس فایل
-    url_get_file = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile?file_id={file_id}"
-    resp = requests.get(url_get_file, timeout=30).json()
-    
-    if not resp.get("ok"):
-        print("❌ Error getting file path from Telegram")
-        return None
-    
-    # ۲. دانلود بایت‌ها
-    file_path = resp["result"]["file_path"]
-    download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
-    
+def download_file_from_telegram(file_id):
+    """
+    با file_id تلگرام، فایل را دانلود کرده و بایت‌های آن را برمی‌گرداند.
+    """
+    # ۱. گرفتن مسیر دانلود از API تلگرام
+    url_info = f"{TG_API_URL}/getFile?file_id={file_id}"
     try:
+        resp = requests.get(url_info, timeout=30).json()
+        if not resp.get("ok"):
+            return None
+            
+        file_path = resp["result"]["file_path"]
+        # ۲. دانلود مستقیم فایل
+        download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
         return requests.get(download_url, timeout=60).content
     except Exception as e:
-        print(f"❌ Error downloading bytes from Telegram: {e}")
-        return None
+        print(f"Error downloading from Telegram: {e}")
+    return None
