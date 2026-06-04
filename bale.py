@@ -267,42 +267,45 @@ def cancel_keyboard():
 
 # ================= CONTENT SENDER =================
 
+# در bale.py اضافه کن/جایگزین کن
+
+import io
+from storage import download_by_message_id # فرض می‌کنیم این تابع فایل را به صورت bytes برمی‌گرداند
+
+async def send_file_to_bale(chat_id, file_type, file_id, caption=""):
+    """
+    دانلود فایل از تلگرام و ارسال به بله
+    """
+    try:
+        # ۱. دانلود فایل از تلگرام (با استفاده از همان helper که در storage.py داری)
+        file_bytes = download_by_message_id(file_id) 
+        
+        if not file_bytes:
+            return False
+
+        # ۲. ارسال به بله (Multipart)
+        # اسم پارامتر بسته به نوع فایل تغییر می‌کند
+        payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+        files = {file_type: ("file", file_bytes)} # file_type مثل 'photo', 'document'
+        
+        await bale_api("send" + file_type.capitalize(), payload=payload, files=files)
+        return True
+    except Exception as e:
+        logging.error(f"Error bridging file to Bale: {e}")
+        return False
+
+# حالا تابع send_node_contents را اینطوری آپدیت کن:
 async def send_node_contents(chat_id, node_id):
     db = load_db()
-
-    if node_id not in db:
-        return
-
     contents = db[node_id].get("contents", [])
-
-    if not contents:
-        return
-
+    
     for item in contents:
-        try:
-            msg_type = item.get("type")
-
-            if msg_type == "text":
-                await send_message(
-                    chat_id,
-                    item.get("text", ""),
-                    parse_mode="HTML"
-                )
-            else:
-                # مهم:
-                # file_id ذخیره‌شده در دیتابیس برای تلگرام است، نه بله.
-                # پس فعلاً فقط کپشن/هشدار می‌فرستیم.
-                caption = item.get("caption", "")
-                await send_message(
-                    chat_id,
-                    "📎 این محتوا از نوع فایل است، اما فایل‌های ذخیره‌شده‌ی تلگرام "
-                    "مستقیماً در بله قابل ارسال نیستند.\n\n"
-                    f"نوع فایل: {msg_type}\n"
-                    f"{caption or ''}"
-                )
-
-        except Exception as e:
-            logging.exception(f"Error sending Bale content: {e}")
+        msg_type = item['type']
+        if msg_type == 'text':
+            await send_message(chat_id, item['text'], parse_mode="HTML")
+        else:
+            # اینجا جادوی اصلی اتفاق می‌افتد:
+            await send_file_to_bale(chat_id, msg_type, item['file_id'], item.get('caption', ''))
 
 
 # ================= START =================
@@ -332,7 +335,7 @@ async def bale_start(chat_id, user_id, args=None):
 
     await send_message(
         chat_id,
-        "🕊 به ربات دانشگاه خوش آمدید. (نسخه بله)v_1_1_0",
+        "🕊 به ربات دانشگاه خوش آمدید. (نسخه بله)v_1_1_2",
         keyboard=get_bale_keyboard("root", admin)
     )
 
@@ -540,7 +543,36 @@ async def handle_waiting_content(chat_id, user_id, text, session, message):
         await send_message(chat_id, "👍 دریافت شد. ادامه بدهید یا ✅ ثبت نهایی را بزنید.")
         return
 
-    await send_message(chat_id, "فعلاً فقط متن در بله ذخیره می‌شود.")
+    # اگر پیام شامل فایل بود (از متد update بله دریافتش می‌کنیم)
+    # بله فایل‌ها را به صورت file_id در update نمی‌دهد، بلکه URL می‌دهد که باید دانلودش کنیم
+    file_info = None
+    if "document" in message:
+        file_info = message["document"]
+    elif "photo" in message:
+        file_info = message["photo"][-1] # کیفیت آخر
+
+    if file_info:
+        # ۱. گرفتن فایل از بله
+        file_url = f"{BALE_API_URL}/getFile?file_id={file_info['file_id']}"
+        file_path = requests.get(file_url).json()["result"]["file_path"]
+        download_url = f"https://api.bale.ai/file/bot{BALE_TOKEN}/{file_path}"
+        file_bytes = requests.get(download_url).content
+        
+        # ۲. آپلود به تلگرام (با استفاده از helper موجود در storage.py)
+        # توجه: باید یک تابع upload داشته باشی که bytes بگیرد
+        new_telegram_file_id = upload_file_to_telegram(file_bytes) 
+        
+        # ۳. ذخیره در دیتابیس مشترک
+        content_data = {
+            'type': 'document' if 'document' in message else 'photo',
+            'file_id': new_telegram_file_id, 
+            'caption': message.get('caption', '')
+        }
+        session.setdefault("temp_content", []).append(content_data)
+        await send_message(chat_id, "✅ فایل آپلود و ذخیره شد.")
+        return
+
+    #await send_message(chat_id, "فعلاً فقط متن در بله ذخیره می‌شود.")
 
 
 async def handle_waiting_rename_button(chat_id, user_id, text, session):
