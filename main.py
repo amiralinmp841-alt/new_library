@@ -30,6 +30,24 @@ import requests
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+from storage import (
+    DB_FILE,
+    USERDATA_FILE,
+    DB_BACKUP_CHAT_ID,
+    USERDATA_BACKUP_CHAT_ID,
+    BACKUP_FILE,
+
+    load_db,
+    save_db,
+    load_userdata,
+    save_userdata,
+
+    upload_file_to_telegram,
+    download_latest_file_from_telegram,
+    download_by_message_id
+)
+userdata = load_userdata()
+db = load_db()
 
 def delete_node_recursive(db, node_id):
     # اگر نود وجود نداشت
@@ -65,15 +83,8 @@ def push_admin_history(context, db):
 # --- wewb port ---
 PORT = int(os.environ.get("PORT", 10000))
 
-# --- supabase --- database
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "db")
-SUPABASE_DB_FILE = os.getenv("SUPABASE_DB_FILE", "database.json")
-
 # --- supabase --- userdata
 USERDATA_FILE = "/tmp/userdata.json"
-SUPABASE_USERDATA_FILE = "userdata.json"   # اسم داخل bucket
 
 # --- admin pannel
 ADMIN_ACCESSIBILITY_NAME = os.getenv("ADMIN_ACCESSIBILITY_NAME")
@@ -117,252 +128,6 @@ logging.basicConfig(
     WAITING_REMOVE_ADMIN
 ) = range(9)
 
-
-# ============ TELEGRAM USER API BACKUP CONFIG ============
-
-DB_FILE = "/tmp/database.json"
-USERDATA_FILE = "/tmp/userdata.json"
-
-TG_API_ID = int(os.getenv("TG_API_ID", "0"))
-TG_API_HASH = os.getenv("TG_API_HASH")
-TG_SESSION_STRING = os.getenv("TG_SESSION_STRING")
-
-DB_BACKUP_CHAT_ID = int(os.getenv("DB_BACKUP_CHAT_ID", "0"))
-USERDATA_BACKUP_CHAT_ID = int(os.getenv("USERDATA_BACKUP_CHAT_ID", "0"))
-
-
-# ============ TELETHON SEPARATE EVENT LOOP ============
-
-telethon_loop = asyncio.new_event_loop()
-telethon_client = None
-telethon_ready = threading.Event()
-
-
-def start_telethon_loop():
-    """
-    Telethon client runs in a separate thread and separate event loop.
-    This prevents conflicts with bot async loop.
-    """
-    global telethon_client
-
-    asyncio.set_event_loop(telethon_loop)
-
-    telethon_client = TelegramClient(
-        StringSession(TG_SESSION_STRING),
-        TG_API_ID,
-        TG_API_HASH,
-        loop=telethon_loop
-    )
-
-    async def init_client():
-        await telethon_client.start()
-        print("✅ Telethon User API client started")
-        telethon_ready.set()
-
-    telethon_loop.run_until_complete(init_client())
-    telethon_loop.run_forever()
-
-
-telethon_thread = threading.Thread(target=start_telethon_loop, daemon=True)
-telethon_thread.start()
-
-
-def run_telethon(coro):
-    """
-    Run async Telethon functions from normal sync code.
-    """
-    telethon_ready.wait(timeout=30)
-
-    if not telethon_ready.is_set():
-        print("❌ Telethon client not ready")
-        return None
-
-    future = asyncio.run_coroutine_threadsafe(coro, telethon_loop)
-    return future.result(timeout=120)
-
-
-# ============ TELEGRAM FILE BACKUP HELPERS ============
-
-async def _upload_file_to_telegram(chat_id, file_path, caption=None):
-    try:
-        if not os.path.exists(file_path):
-            print(f"❌ File not found for upload: {file_path}")
-            return False
-
-        await telethon_client.send_file(
-            entity=chat_id,
-            file=file_path,
-            caption=caption or f"backup: {os.path.basename(file_path)}"
-        )
-
-        print(f"⬆️ Uploaded to Telegram group: {file_path}")
-        return True
-
-    except Exception as e:
-        print(f"❌ Failed to upload file to Telegram: {e}")
-        return False
-
-
-async def _download_latest_file_from_telegram(chat_id, filename, save_path):
-    try:
-        print(f"🔍 Searching latest {filename} in Telegram group {chat_id}...")
-
-        async for message in telethon_client.iter_messages(chat_id, limit=200):
-            if not message.file:
-                continue
-
-            original_name = message.file.name if message.file.name else None
-            caption = message.message or ""
-
-            if original_name == filename or filename in caption:
-                await message.download_media(file=save_path)
-                print(f"⬇️ Downloaded latest {filename} from Telegram group")
-                return True
-
-        print(f"⚠️ No file named {filename} found in Telegram group")
-        return False
-
-    except Exception as e:
-        print(f"❌ Failed to download file from Telegram: {e}")
-        return False
-
-
-def upload_file_to_telegram(chat_id, file_path, caption=None):
-    return run_telethon(
-        _upload_file_to_telegram(chat_id, file_path, caption)
-    )
-
-
-def download_latest_file_from_telegram(chat_id, filename, save_path):
-    return run_telethon(
-        _download_latest_file_from_telegram(chat_id, filename, save_path)
-    )
-
-
-# ============ DATABASE BACKUP WITH TELEGRAM ============
-
-def download_db_from_telegram():
-    return download_latest_file_from_telegram(
-        chat_id=DB_BACKUP_CHAT_ID,
-        filename="database.json",
-        save_path=DB_FILE
-    )
-
-
-def upload_db_to_telegram():
-    return upload_file_to_telegram(
-        chat_id=DB_BACKUP_CHAT_ID,
-        file_path=DB_FILE,
-        caption="database.json"
-    )
-
-
-def load_db():
-    # اگر فایل محلی وجود ندارد، از گروه تلگرام دانلود کن
-    if not os.path.exists(DB_FILE):
-        print("⚠️ Local DB not found. Restoring from Telegram group...")
-
-        if not download_db_from_telegram():
-            print("⚠️ Telegram DB backup not found, creating new DB")
-
-            initial_db = {
-                "root": {
-                    "name": "خانه",
-                    "parent": None,
-                    "children": [],
-                    "contents": []
-                }
-            }
-
-            save_db(initial_db)
-            return initial_db
-
-    # فایل محلی را لود کن
-    try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    except Exception as e:
-        print("❌ Failed to load local DB:", e)
-        return {}
-
-
-def save_db(data):
-    # ذخیره لوکال
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        print("💾 DB saved locally")
-
-    except Exception as e:
-        print("❌ Failed to save DB locally:", e)
-        return False
-
-    # ارسال به گروه تلگرام
-    return upload_db_to_telegram()
-
-
-# ============ USERDATA BACKUP WITH TELEGRAM ============
-
-def download_userdata_from_telegram():
-    return download_latest_file_from_telegram(
-        chat_id=USERDATA_BACKUP_CHAT_ID,
-        filename="userdata.json",
-        save_path=USERDATA_FILE
-    )
-
-
-def upload_userdata_to_telegram():
-    return upload_file_to_telegram(
-        chat_id=USERDATA_BACKUP_CHAT_ID,
-        file_path=USERDATA_FILE,
-        caption="userdata.json"
-    )
-
-
-def load_userdata():
-    # اگر فایل محلی نبود، از گروه تلگرام بگیر
-    if not os.path.exists(USERDATA_FILE):
-        print("⚠️ Local userdata not found. Restoring from Telegram group...")
-
-        if not download_userdata_from_telegram():
-            print("⚠️ No userdata backup in Telegram. Creating new userdata.")
-
-            save_userdata({})
-            return {}
-
-    try:
-        with open(USERDATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    except Exception as e:
-        print("❌ Failed to load userdata:", e)
-        return {}
-
-
-def save_userdata(data):
-    # ذخیره لوکال
-    try:
-        with open(USERDATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        print("💾 Userdata saved locally")
-
-    except Exception as e:
-        print("❌ Failed to save userdata locally:", e)
-        return False
-
-    # ارسال به گروه تلگرام
-    return upload_userdata_to_telegram()
-
-
-# فایل بکاپ روزانه، اگر در جای دیگری از کدت استفاده می‌شود
-BACKUP_FILE = "/tmp/backup_database.zip"
-
-
-# در انتها، مثل قبل:
-userdata = load_userdata()
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
