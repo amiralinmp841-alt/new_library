@@ -47,6 +47,8 @@ from storage import (
     download_by_message_id,
     upload_db_to_telegram
 )
+from bale import handle_bale_update
+
 userdata = load_userdata()
 db = load_db()
 
@@ -1319,6 +1321,15 @@ async def webhook_handler(request):
     await app.process_update(update)
     return web.Response(text="OK")
 
+async def bale_webhook_handler(request):
+    try:
+        data = await request.json()
+        await handle_bale_update(data)
+        return web.Response(text="OK")
+    except Exception as e:
+        logging.exception(f"Bale webhook error: {e}")
+        return web.Response(text="ERROR", status=500)
+
 # ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======  ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======
 # ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======  ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======
 # ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======  ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======
@@ -1341,7 +1352,11 @@ async def main():
     webapp["tg"] = tg_app
     webapp.router.add_get("/", health)
     webapp.router.add_get("/health", health)
+    # webhook تلگرام
     webapp.router.add_post(f"/{TOKEN}", webhook_handler)
+    
+    # webhook بله
+    webapp.router.add_post("/bale", bale_webhook_handler)
 
     runner = web.AppRunner(webapp)
     await runner.setup()
