@@ -44,7 +44,8 @@ from storage import (
 
     upload_file_to_telegram,
     download_latest_file_from_telegram,
-    download_by_message_id
+    download_by_message_id,
+    upload_db_to_telegram
 )
 userdata = load_userdata()
 db = load_db()
