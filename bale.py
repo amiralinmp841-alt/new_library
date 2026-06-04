@@ -8,6 +8,9 @@ import io as iolib
 import asyncio
 import requests
 from datetime import datetime
+import tempfile
+import os
+import requests
 
 from storage import (
     DB_FILE,
@@ -22,6 +25,9 @@ from storage import (
 BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
 BALE_BOT_USERNAME = os.getenv("BALE_BOT_USERNAME", "")
 ADMIN_ACCESSIBILITY_NAME = os.getenv("ADMIN_ACCESSIBILITY_NAME")
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 BALE_ADMIN_IDS = []
 if os.getenv("BALE_ADMIN_IDS"):
@@ -274,39 +280,82 @@ from storage import download_by_message_id # فرض می‌کنیم این تا�
 
 async def send_file_to_bale(chat_id, file_type, file_id, caption=""):
     """
-    دانلود فایل از تلگرام و ارسال به بله
+    Downloads file from Telegram backup via Bot API
+    then uploads it to Bale.
     """
-    try:
-        # ۱. دانلود فایل از تلگرام (با استفاده از همان helper که در storage.py داری)
-        file_bytes = download_by_message_id(file_id) 
-        
-        if not file_bytes:
-            return False
 
-        # ۲. ارسال به بله (Multipart)
-        # اسم پارامتر بسته به نوع فایل تغییر می‌کند
-        payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
-        files = {file_type: ("file", file_bytes)} # file_type مثل 'photo', 'document'
-        
-        await bale_api("send" + file_type.capitalize(), payload=payload, files=files)
-        return True
-    except Exception as e:
-        logging.error(f"Error bridging file to Bale: {e}")
-        return False
+    # ✅ دانلود از تلگرام
+    file_bytes, filename = await download_from_telegram(file_id)
 
-# حالا تابع send_node_contents را اینطوری آپدیت کن:
+    if not file_bytes:
+        await send_message(chat_id, "❌ خطا در دریافت فایل از بکاپ تلگرام.")
+        return
+
+    # ✅ ارسال به بله
+    files = {
+        "document": (filename, file_bytes)
+    }
+
+    payload = {
+        "chat_id": chat_id,
+        "caption": caption or ""
+    }
+
+    await bale_api("sendDocument", payload=payload, files=files)
+
 async def send_node_contents(chat_id, node_id):
     db = load_db()
-    contents = db[node_id].get("contents", [])
-    
-    for item in contents:
-        msg_type = item['type']
-        if msg_type == 'text':
-            await send_message(chat_id, item['text'], parse_mode="HTML")
-        else:
-            # اینجا جادوی اصلی اتفاق می‌افتد:
-            await send_file_to_bale(chat_id, msg_type, item['file_id'], item.get('caption', ''))
+    node = db["nodes"].get(node_id)
+    if not node:
+        return
 
+    # ✅ متن
+    if node.get("text"):
+        await send_message(chat_id, node["text"])
+
+    # ✅ فایل‌ها
+    for file_item in node.get("files", []):
+        await send_file_to_bale(
+            chat_id=chat_id,
+            file_type=file_item.get("type"),
+            file_id=file_item.get("file_id"),
+            caption=file_item.get("caption", "")
+        )
+
+
+async def download_from_telegram(file_id):
+    """
+    Downloads a file from Telegram using Bot API file_id.
+    Returns (file_bytes, filename)
+    """
+
+    # 1️⃣ getFile
+    res = await asyncio.to_thread(
+        requests.get,
+        f"{TELEGRAM_API_URL}/getFile",
+        params={"file_id": file_id}
+    )
+
+    data = res.json()
+    if not data.get("ok"):
+        print("Telegram getFile error:", data)
+        return None, None
+
+    file_path = data["result"]["file_path"]
+
+    # 2️⃣ Download actual file
+    file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+
+    file_res = await asyncio.to_thread(requests.get, file_url)
+
+    if file_res.status_code != 200:
+        print("Telegram file download failed")
+        return None, None
+
+    file_bytes = file_res.content
+    filename = os.path.basename(file_path)
+
+    return file_bytes, filename
 
 # ================= START =================
 
@@ -335,7 +384,7 @@ async def bale_start(chat_id, user_id, args=None):
 
     await send_message(
         chat_id,
-        "🕊 به ربات دانشگاه خوش آمدید. (نسخه بله)v_1_1_2",
+        "🕊 به ربات دانشگاه خوش آمدید. (نسخه بله)v_1_1_4",
         keyboard=get_bale_keyboard("root", admin)
     )
 
