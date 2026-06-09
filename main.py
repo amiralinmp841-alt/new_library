@@ -759,17 +759,27 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
             logging.error(f"Error sending content: {e}")
             
 def get_subtree_db(db, root_node_id):
-    """استخراج دیتابیس فقط شامل نود فعلی و تمام فرزندانش"""
+    """استخراج زیرشاخه با غنی‌سازی نام نودها برای جستجوی بهتر"""
     subtree = {}
     
     def add_node_recursive(node_id):
         if node_id in db:
-            subtree[node_id] = db[node_id]
-            for child in db[node_id].get("children", []):
+            # کپی از نود اصلی برای اینکه دیتابیس واقعی تغییر نکند
+            node = db[node_id].copy()
+            
+            # 💡 جادوی اصلی اینجاست: 
+            # دریافت مسیر کامل (مثل: آناتومی ⬅️ وویس)
+            # ترکیب نام فعلی با مسیر کامل
+            full_path = get_node_path_text(db, node_id, separator=" ")
+            node["name"] = f"{node['name']} {full_path}"
+            
+            subtree[node_id] = node
+            for child in node.get("children", []):
                 add_node_recursive(child)
     
     add_node_recursive(root_node_id)
     return subtree
+
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
     current_node = context.user_data.get("current_node", "root")
@@ -891,7 +901,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["current_node"] = "root"
 
     await update.message.reply_text(
-        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.3.12)",
+        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.3.15)",
         reply_markup=get_keyboard("root", is_admin)
     )
 
