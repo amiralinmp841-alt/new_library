@@ -911,12 +911,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🏠 start عادی
     context.user_data["current_node"] = "root"
-
+    
     await update.message.reply_text(
-        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.3.17)",
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.3.21)
+    
+    🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
+    مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
+    
+    یا اینکه از دکمه‌های آماده استفاده کنید.""",
         reply_markup=get_keyboard("root", is_admin)
     )
-
     return CHOOSING
 
 async def admin_inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2372,14 +2376,16 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         def clone_node(old_id, new_parent):
             new_id = str(uuid.uuid4())
             old = db[old_id]
-
+            
+            # 💡 کپی کردن تمام فیلدها از جمله style
             db[new_id] = {
                 "name": old["name"],
                 "parent": new_parent,
                 "children": [],
-                "contents": old.get("contents", []).copy()
+                "contents": old.get("contents", []).copy(),
+                "style": old.get("style")  # <--- این خط را اضافه کن
             }
-
+            
             for child in old.get("children", []):
                 child_new_id = clone_node(child, new_id)
                 db[new_id]["children"].append(child_new_id)
