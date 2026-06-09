@@ -757,60 +757,55 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     await update.message.reply_voice(voice=file_id, caption=caption, parse_mode="HTML")
         except Exception as e:
             logging.error(f"Error sending content: {e}")
-
+            
+def get_subtree_db(db, root_node_id):
+    """استخراج دیتابیس فقط شامل نود فعلی و تمام فرزندانش"""
+    subtree = {}
+    
+    def add_node_recursive(node_id):
+        if node_id in db:
+            subtree[node_id] = db[node_id]
+            for child in db[node_id].get("children", []):
+                add_node_recursive(child)
+    
+    add_node_recursive(root_node_id)
+    return subtree
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
-    db = load_db()
-
-    results = smart_search(db, text, limit=5, min_score=45)
+    full_db = load_db()
+    current_node = context.user_data.get("current_node", "root")
+    
+    # محدود کردن جستجو فقط به زیرشاخه فعلی
+    subtree_db = get_subtree_db(full_db, current_node)
+    
+    # جستجو در زیرشاخه
+    results = smart_search(subtree_db, text, limit=5, min_score=45)
 
     if not results:
-        await update.message.reply_text(
-            "🔍 چیزی پیدا نشد.\n\n"
-            "لطفاً با عبارت دیگری جستجو کنید؛ مثلاً:\n"
-            "«آناتومی وویس»\n"
-            "«جزوه فیزیولوژی»\n"
-            "«ترم یک بافت»"
-        )
+        await update.message.reply_text("🔍 نتیجه‌ای در این پوشه یافت نشد.")
         return CHOOSING
 
-    if len(results) == 1:
-        node_id = results[0]["node_id"]
+    bot_username = context.bot.username
+    msg = "🔍 نتایج یافت شده در این پوشه:\n\n"
 
-        await update.message.reply_text(
-            f"🔎 نزدیک‌ترین نتیجه:\n\n"
-            f"📂 {results[0]['path']}\n"
-            f"امتیاز تطابق: {int(results[0]['score'])}٪"
-        )
+    for item in results:
+        node_id = item["node_id"]
+        # دریافت مسیر کامل از دیتابیس اصلی
+        path_text = get_node_path_text(full_db, node_id)
+        
+        # ساخت دیپ‌لینک
+        deep_link = f"https://t.me/{bot_username}?start={node_id}"
+        
+        # فرمت‌دهی با لینک HTML (قابل کلیک)
+        msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
+        msg += f"امتیاز تطابق: {int(item['score'])}٪\n\n"
 
-        # اگر کاربر عادی باشد و نود فرزند نداشته باشد، فقط محتوا را بفرست
-        node = db.get(node_id, {})
-        if not is_admin and not node.get("children"):
-            await send_node_contents(update, context, node_id)
-            return CHOOSING
+    msg += "روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید."
 
-        # اگر ادمین است یا نود فرزند دارد، وارد آن پوشه شود
-        context.user_data["current_node"] = node_id
-
-        await update.message.reply_text(
-            f"📂 {node.get('name', 'نتیجه جستجو')}",
-            reply_markup=get_keyboard(node_id, is_admin)
-        )
-
-        await send_node_contents(update, context, node_id)
-        return CHOOSING
-
-    # اگر چند نتیجه بود، لیست بده
-    msg = "🔍 نتایج نزدیک:\n\n"
-
-    for i, item in enumerate(results, start=1):
-        msg += (
-            f"{i}. 📂 {item['path']}\n"
-            f"درصد تطابق: {int(item['score'])}٪\n\n"
-        )
-
-    msg += "برای ورود، اسم یکی از مسیرها/دکمه‌ها را دقیق‌تر بفرست."
-
-    await update.message.reply_text(msg)
+    await update.message.reply_text(
+        msg, 
+        parse_mode="HTML", 
+        disable_web_page_preview=True
+    )
 
     return CHOOSING
 
