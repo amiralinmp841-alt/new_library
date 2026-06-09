@@ -56,20 +56,15 @@ def get_content_texts(node):
 
 
 def flatten_db_for_search(db):
-    """
-    دیتابیس درختی را به لیست قابل جستجو تبدیل می‌کند.
-    خروجی:
-    [
-      {
-        "node_id": "...",
-        "title": "...",
-        "path": "...",
-        "search_text": "..."
-      }
-    ]
-    """
-
     results = []
+
+    # پیدا کردن ریشه دیتابیس (نودی که parent ندارد یا parent داخل db نیست)
+    start_nodes = []
+
+    for node_id, node in db.items():
+        parent = node.get("parent")
+        if not parent or parent not in db:
+            start_nodes.append(node_id)
 
     def walk(node_id, path_parts):
         node = db.get(node_id)
@@ -89,7 +84,6 @@ def flatten_db_for_search(db):
             f"{node_name} {path_text} {contents_text}"
         )
 
-        # root را وارد نتایج نکن
         if node_id != "root":
             results.append({
                 "node_id": node_id,
@@ -101,10 +95,11 @@ def flatten_db_for_search(db):
         for child_id in node.get("children", []):
             walk(child_id, new_path_parts)
 
-    walk("root", [])
+    # شروع از ریشه‌های واقعی
+    for start in start_nodes:
+        walk(start, [])
 
     return results
-
 
 def smart_search(db, query, limit=5, min_score=45):
     query_norm = normalize_text(query)
