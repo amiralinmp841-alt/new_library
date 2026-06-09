@@ -2522,7 +2522,9 @@ def build_application():
     application.add_handler(CommandHandler("blue", set_node_style), group=0)
     application.add_handler(CommandHandler("red", set_node_style), group=0)
     application.add_handler(CommandHandler("none", set_node_style), group=0)
-
+    
+    application.add_handler(CommandHandler("search", search_handler))
+    
     # 🔔 پیام‌های بدون /start → not_started
     application.add_handler(
         MessageHandler(
