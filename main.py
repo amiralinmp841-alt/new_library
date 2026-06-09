@@ -760,28 +760,40 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
             
 def get_subtree_db(db, root_node_id):
     """
-    استخراج زیرشاخه شامل نود فعلی و تمام فرزندانش.
-    نام نودها در این زیرشاخه غنی می‌شود تا جستجو شامل پدرها هم بشود.
+    فقط زیرشاخه فعلی را استخراج می‌کند
+    ولی برای هر نود یک متن جستجو شامل نام خودش + نام تمام والدها می‌سازد.
     """
     subtree = {}
-    
+
+    def build_search_context(node_id):
+        parts = []
+        current = node_id
+
+        while current and current in db:
+            if current != "root":
+                parts.append(db[current].get("name", ""))
+            current = db[current].get("parent")
+
+        parts.reverse()
+        return " ".join(parts)
+
     def add_node_recursive(node_id):
-        if node_id in db:
-            # 1. کپی عمیق (Deep Copy) برای اینکه دیتابیس اصلی تغییر نکند
-            node = copy.deepcopy(db[node_id])
-            
-            # 2. دریافت مسیر کامل برای جستجوی بهتر (مثال: "ترم 1 آناتومی وویس")
-            # از فاصله (" ") استفاده می‌کنیم تا الگوریتم سرچ راحت‌تر کلمات را جدا کند
-            full_path = get_node_path_text(db, node_id, separator=" ")
-            
-            # 3. ترکیب نام اصلی با مسیر برای "غنی‌سازی" متن جستجو
-            # حالا مثلاً نود «وویس» تبدیل می‌شود به «وویس ترم 1 آناتومی وویس»
-            node["name"] = f"{node.get('name', '')} {full_path}"
-            
-            subtree[node_id] = node
-            for child in db[node_id].get("children", []):
-                add_node_recursive(child)
-    
+        if node_id not in db:
+            return
+
+        node = copy.deepcopy(db[node_id])
+
+        # ساخت متن جستجو
+        search_context = build_search_context(node_id)
+
+        # این فیلد مخصوص سرچ است
+        node["search_text"] = search_context
+
+        subtree[node_id] = node
+
+        for child in db[node_id].get("children", []):
+            add_node_recursive(child)
+
     add_node_recursive(root_node_id)
     return subtree
 
@@ -906,7 +918,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["current_node"] = "root"
 
     await update.message.reply_text(
-        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.3.15)",
+        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.3.16)",
         reply_markup=get_keyboard("root", is_admin)
     )
 
