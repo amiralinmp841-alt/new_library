@@ -759,22 +759,27 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
             logging.error(f"Error sending content: {e}")
             
 def get_subtree_db(db, root_node_id):
-    """استخراج زیرشاخه با غنی‌سازی نام نودها برای جستجوی بهتر"""
+    """
+    استخراج زیرشاخه شامل نود فعلی و تمام فرزندانش.
+    نام نودها در این زیرشاخه غنی می‌شود تا جستجو شامل پدرها هم بشود.
+    """
     subtree = {}
     
     def add_node_recursive(node_id):
         if node_id in db:
-            # کپی از نود اصلی برای اینکه دیتابیس واقعی تغییر نکند
-            node = db[node_id].copy()
+            # 1. کپی عمیق (Deep Copy) برای اینکه دیتابیس اصلی تغییر نکند
+            node = copy.deepcopy(db[node_id])
             
-            # 💡 جادوی اصلی اینجاست: 
-            # دریافت مسیر کامل (مثل: آناتومی ⬅️ وویس)
-            # ترکیب نام فعلی با مسیر کامل
+            # 2. دریافت مسیر کامل برای جستجوی بهتر (مثال: "ترم 1 آناتومی وویس")
+            # از فاصله (" ") استفاده می‌کنیم تا الگوریتم سرچ راحت‌تر کلمات را جدا کند
             full_path = get_node_path_text(db, node_id, separator=" ")
-            node["name"] = f"{node['name']} {full_path}"
+            
+            # 3. ترکیب نام اصلی با مسیر برای "غنی‌سازی" متن جستجو
+            # حالا مثلاً نود «وویس» تبدیل می‌شود به «وویس ترم 1 آناتومی وویس»
+            node["name"] = f"{node.get('name', '')} {full_path}"
             
             subtree[node_id] = node
-            for child in node.get("children", []):
+            for child in db[node_id].get("children", []):
                 add_node_recursive(child)
     
     add_node_recursive(root_node_id)
