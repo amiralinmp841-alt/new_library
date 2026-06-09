@@ -41,7 +41,9 @@ from aiohttp import web
 import requests
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-
+from search_engine import BotSearchEngine
+# متغیر سراسری برای موتور جستجو
+search_engine = BotSearchEngine()
 
 def delete_node_recursive(db, node_id):
     # اگر نود وجود نداشت
@@ -563,6 +565,30 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_keyboard(parent_id, True)
     )
 
+async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("❌ لطفا عبارت جستجو را وارد کنید.\nمثال: /search آناتومی")
+        return
+
+    # جستجوی معنایی
+    found_node_ids = search_engine.search(query)
+    
+    if not found_node_ids:
+        await update.message.reply_text("🔍 نتیجه‌ای پیدا نشد.")
+        return
+
+    db = load_db()
+    msg = "🔍 نتایج جستجو:\n\n"
+    for nid in found_node_ids:
+        path = get_node_path_text(db, nid) # تابع خودش توی کد هست
+        # ارسال لینک مستقیم (Deep link)
+        msg += f"📂 {path}\n🔗 /start_{nid}\n\n"
+    
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+# در تابع build_application اضافه کن:
+# application.add_handler(CommandHandler("search", search_handler))
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
@@ -2580,6 +2606,11 @@ async def webhook_handler(request):
 
 # ================= MAIN ================
 async def main():
+    # 1. لود دیتابیس
+    db = load_db()
+    # 2. ساخت ایندکس (فقط یکبار در زمان استارت ربات)
+    search_engine.build_index(db)
+    
     tg_app = build_application()
     await tg_app.initialize()
     await tg_app.bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
