@@ -759,10 +759,6 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
             logging.error(f"Error sending content: {e}")
             
 def get_subtree_db(db, root_node_id):
-    """
-    فقط زیرشاخه فعلی را استخراج می‌کند
-    ولی برای هر نود یک متن جستجو شامل نام خودش + نام تمام والدها می‌سازد.
-    """
     subtree = {}
 
     def build_search_context(node_id):
@@ -783,11 +779,10 @@ def get_subtree_db(db, root_node_id):
 
         node = copy.deepcopy(db[node_id])
 
-        # ساخت متن جستجو
         search_context = build_search_context(node_id)
 
-        # این فیلد مخصوص سرچ است
-        node["search_text"] = search_context
+        # متن جستجو را مستقیماً داخل name قرار می‌دهیم
+        node["name"] = search_context
 
         subtree[node_id] = node
 
@@ -918,7 +913,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["current_node"] = "root"
 
     await update.message.reply_text(
-        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.3.16)",
+        "🕊️ به ربات دانشگاه خوش آمدید. (V_4.3.17)",
         reply_markup=get_keyboard("root", is_admin)
     )
 
