@@ -84,14 +84,14 @@ def flatten_db_for_search(db):
             f"{node_name} {path_text} {contents_text}"
         )
 
-        if node_id != "root":
+        if node_id not in start_nodes:
             results.append({
                 "node_id": node_id,
                 "title": node_name,
                 "path": " ⬅️ ".join(new_path_parts),
                 "search_text": search_text
             })
-
+            
         for child_id in node.get("children", []):
             walk(child_id, new_path_parts)
 
