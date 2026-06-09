@@ -41,9 +41,8 @@ from aiohttp import web
 import requests
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from search_engine import BotSearchEngine
-# متغیر سراسری برای موتور جستجو
-search_engine = BotSearchEngine()
+from smart_search import smart_search
+
 
 def delete_node_recursive(db, node_id):
     # اگر نود وجود نداشت
@@ -565,30 +564,6 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_keyboard(parent_id, True)
     )
 
-async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = " ".join(context.args)
-    if not query:
-        await update.message.reply_text("❌ لطفا عبارت جستجو را وارد کنید.\nمثال: /search آناتومی")
-        return
-
-    # جستجوی معنایی
-    found_node_ids = search_engine.search(query)
-    
-    if not found_node_ids:
-        await update.message.reply_text("🔍 نتیجه‌ای پیدا نشد.")
-        return
-
-    db = load_db()
-    msg = "🔍 نتایج جستجو:\n\n"
-    for nid in found_node_ids:
-        path = get_node_path_text(db, nid) # تابع خودش توی کد هست
-        # ارسال لینک مستقیم (Deep link)
-        msg += f"📂 {path}\n🔗 /start_{nid}\n\n"
-    
-    await update.message.reply_text(msg, parse_mode="HTML")
-
-# در تابع build_application اضافه کن:
-# application.add_handler(CommandHandler("search", search_handler))
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
@@ -783,6 +758,61 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
         except Exception as e:
             logging.error(f"Error sending content: {e}")
 
+async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
+    db = load_db()
+
+    results = smart_search(db, text, limit=5, min_score=45)
+
+    if not results:
+        await update.message.reply_text(
+            "🔍 چیزی پیدا نشد.\n\n"
+            "لطفاً با عبارت دیگری جستجو کنید؛ مثلاً:\n"
+            "«آناتومی وویس»\n"
+            "«جزوه فیزیولوژی»\n"
+            "«ترم یک بافت»"
+        )
+        return CHOOSING
+
+    if len(results) == 1:
+        node_id = results[0]["node_id"]
+
+        await update.message.reply_text(
+            f"🔎 نزدیک‌ترین نتیجه:\n\n"
+            f"📂 {results[0]['path']}\n"
+            f"امتیاز تطابق: {int(results[0]['score'])}٪"
+        )
+
+        # اگر کاربر عادی باشد و نود فرزند نداشته باشد، فقط محتوا را بفرست
+        node = db.get(node_id, {})
+        if not is_admin and not node.get("children"):
+            await send_node_contents(update, context, node_id)
+            return CHOOSING
+
+        # اگر ادمین است یا نود فرزند دارد، وارد آن پوشه شود
+        context.user_data["current_node"] = node_id
+
+        await update.message.reply_text(
+            f"📂 {node.get('name', 'نتیجه جستجو')}",
+            reply_markup=get_keyboard(node_id, is_admin)
+        )
+
+        await send_node_contents(update, context, node_id)
+        return CHOOSING
+
+    # اگر چند نتیجه بود، لیست بده
+    msg = "🔍 نتایج نزدیک:\n\n"
+
+    for i, item in enumerate(results, start=1):
+        msg += (
+            f"{i}. 📂 {item['path']}\n"
+            f"درصد تطابق: {int(item['score'])}٪\n\n"
+        )
+
+    msg += "برای ورود، اسم یکی از مسیرها/دکمه‌ها را دقیق‌تر بفرست."
+
+    await update.message.reply_text(msg)
+
+    return CHOOSING
 
 # --- HANDLERS ---
 async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1943,8 +1973,8 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_node_contents(update, context, child_id)
             return CHOOSING
 
-
-
+    # ✅ اگر دکمه نبود، سرچ کن
+    return await handle_smart_search(update, context, text, is_admin)
 
 async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "❌ لغو":
@@ -2522,9 +2552,7 @@ def build_application():
     application.add_handler(CommandHandler("blue", set_node_style), group=0)
     application.add_handler(CommandHandler("red", set_node_style), group=0)
     application.add_handler(CommandHandler("none", set_node_style), group=0)
-    
-    application.add_handler(CommandHandler("search", search_handler))
-    
+
     # 🔔 پیام‌های بدون /start → not_started
     application.add_handler(
         MessageHandler(
@@ -2608,11 +2636,6 @@ async def webhook_handler(request):
 
 # ================= MAIN ================
 async def main():
-    # 1. لود دیتابیس
-    db = load_db()
-    # 2. ساخت ایندکس (فقط یکبار در زمان استارت ربات)
-    search_engine.build_index(db)
-    
     tg_app = build_application()
     await tg_app.initialize()
     await tg_app.bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
