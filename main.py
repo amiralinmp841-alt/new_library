@@ -878,6 +878,16 @@ async def receive_chat_message(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     message = update.message
 
+    # بررسی اینکه آیا کاربر می‌خواهد چت را لغو کند
+    if message.text and message.text.strip() == "/cancel":
+        current_node = context.user_data.get("current_node", "root")
+        await message.reply_text(
+            "❌ چت با مدیریت پایان یافت. به منوی اصلی بازگشتید.",
+            # در صورت وجود تابع ساخت کیبورد، کیبورد منوی اصلی را اینجا قرار دهید:
+            # reply_markup=get_keyboard(current_node) 
+        )
+        return CHOOSING
+
     full_name = html.escape(user.full_name or "بدون نام")
     username = user.username
     username_text = f"@{html.escape(username)}" if username else "ندارد"
@@ -887,31 +897,36 @@ async def receive_chat_message(update: Update, context: ContextTypes.DEFAULT_TYP
         "📨 <b>پیام جدید برای مدیریت</b>\n\n"
         f"👤 <b>کاربر:</b> {user_link}\n"
         f"🆔 <b>آیدی عددی:</b> <code>{user.id}</code>\n"
-        f"🔗 <b>یوزرنیم:</b> <code>{username_text}</code>\n\n"
+        f"🔗 <b>یوزرنیم:</b> {username_text}\n\n"
         "📩 <b>محتوا:</b>"
     )
 
     try:
+        # ۱. ارسال مشخصات کاربر به گروه
         await context.bot.send_message(
             chat_id=REPORT_GROUP_ID,
             text=header,
             parse_mode="HTML"
         )
 
-        # پیام اصلی را کپی کن
+        # ۲. کپی پیام کاربر (کپی کامل هرگونه فایل، عکس، ویدیو، گیف، استیکر و متن)
         await context.bot.copy_message(
             chat_id=REPORT_GROUP_ID,
             from_chat_id=message.chat_id,
             message_id=message.message_id
         )
 
-        await update.message.reply_text("✅ پیام شما برای مدیریت ارسال شد.")
+        await update.message.reply_text(
+            "✅ پیام شما برای مدیریت ارسال شد.\n"
+            "می‌توانید پیام‌های بعدی خود را بفرستید یا برای اتمام چت دستور /cancel را ارسال کنید."
+        )
 
     except Exception as e:
         print("Failed to send chat message:", e)
         await update.message.reply_text("❌ ارسال پیام با خطا مواجه شد.")
 
-    return CHOOSING
+    # بسیار مهم: کاربر در وضعیت چت باقی می‌ماند تا زمانی که /cancel بفرستد
+    return WAITING_CHAT_MESSAGE
 
 async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE, node_id: str):
     """محتواهای موجود در نود فعلی را ارسال می‌کند"""
@@ -3152,8 +3167,8 @@ def build_application():
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_broadcast_content)
             ],
             WAITING_CHAT_MESSAGE: [
-                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_chat_message),
-                CommandHandler("cancel", cancel)
+                CommandHandler("cancel", cancel),
+                MessageHandler(filters.ALL & (~filters.COMMAND), receive_chat_message),
             ]
         },
         fallbacks=[CommandHandler('start', start)]
