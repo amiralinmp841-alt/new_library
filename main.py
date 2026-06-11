@@ -932,6 +932,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    data = query.data
 
     user_id = query.from_user.id
     userdata = load_userdata()
@@ -944,26 +945,12 @@ async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["waiting_for_user_reply"] = True
         return CHOOSING
     
-    # در handle_navigation یا یک پیام‌گیر عمومی:
-    if context.user_data.get("waiting_for_user_reply"):
-        REPORT_GROUP_ID = os.getenv("REPORT_GROUP_ID")
-        user = update.effective_user
-        # ارسال به گروه
-        await context.bot.send_message(chat_id=REPORT_GROUP_ID, text=f"📩 پاسخ جدید از کاربر {user.full_name} (<code>{user.id}</code>):", parse_mode="HTML")
-        await context.bot.copy_message(chat_id=REPORT_GROUP_ID, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
-        
-        await update.message.reply_text("✅ پیام شما به مدیریت ارسال شد.")
-        context.user_data["waiting_for_user_reply"] = False
-        return CHOOSING
-
     # ---- مخصوص ادمین ---- ---- ----
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
     if not is_admin:
         await query.answer("⛔️ شما دسترسی ادمین ندارید.", show_alert=True)
         return CHOOSING
-
-    data = query.data
 
     # ---------------- پنل اصلی ادمین ----------------
     if data == "admin_access":
@@ -1834,7 +1821,6 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- 2. هندل کردن دستورات ادمین ---  --- هندل کردن دستورات ادمین --- --- هندل کردن دستورات ادمین --- --- هندل کردن دستورات ادمین --- --- هندل کردن دستورات ادمین ---
 
     # --- Admin panel back handling ------------------------------------------------------------------------------------------
-    # --- Admin panel back handling ---
     if text == "🔙 بازگشت" and context.user_data.get("admin_panel"):
         panel = context.user_data["admin_panel"]
 
@@ -1871,16 +1857,17 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['current_node'] = 'root'
             await update.message.reply_text("شما در صفحه اصلی هستید.", reply_markup=get_keyboard('root', is_admin))
         return CHOOSING
- 
-    # --- Admin Accessibility --- 
-    if is_admin and text == os.getenv("ADMIN_ACCESSIBILITY_NAME"):
-        context.user_data["admin_panel"] = "access"
-    
-        await update.message.reply_text(
-            "🔐 پنل مدیریت:",
-            reply_markup=get_admin_access_inline_keyboard()
-        )
-    
+
+    # در handle_navigation یا یک پیام‌گیر عمومی:
+    if context.user_data.get("waiting_for_user_reply"):
+        REPORT_GROUP_ID = os.getenv("REPORT_GROUP_ID")
+        user = update.effective_user
+        # ارسال به گروه
+        await context.bot.send_message(chat_id=REPORT_GROUP_ID, text=f"📩 پاسخ جدید از کاربر {user.full_name} (<code>{user.id}</code>):", parse_mode="HTML")
+        await context.bot.copy_message(chat_id=REPORT_GROUP_ID, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
+        
+        await update.message.reply_text("✅ پیام شما به مدیریت ارسال شد.")
+        context.user_data["waiting_for_user_reply"] = False
         return CHOOSING
     
     # ======= Admin panel handling END ======= ======= Admin panel handling END ======= ======= Admin panel handling END ======= ======= Admin panel handling END ======= ===
