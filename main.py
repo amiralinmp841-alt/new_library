@@ -678,6 +678,9 @@ def get_user_mgmt_inline_keyboard():
             InlineKeyboardButton("✅ خارج کردن از بن", callback_data="admin_users_unban")
         ],
         [
+            InlineKeyboardButton("📨 پیام به کاربران", callback_data="admin_users_message")
+        ],
+        [
             InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back_access")
         ]
     ])
@@ -1182,12 +1185,6 @@ async def admin_inline_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["broadcast_messages"] = []
         return WAITING_SINGLE_USER_CONTENT
 
-    # ---------------- لیست ادمین‌ها ----------------
-    if data == "admin_list":
-        return await list_admins_inline(update, context)
-
-    return CHOOSING
-
     # در admin_inline_handler اضافه کنید:
     if data == "reply_to_admin":
         await query.message.reply_text("📝 پیام خود را بنویسید تا برای مدیریت ارسال شود:")
@@ -1205,7 +1202,13 @@ async def admin_inline_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("✅ پیام شما به مدیریت ارسال شد.")
         context.user_data["waiting_for_user_reply"] = False
         return CHOOSING
-    
+        
+    # ---------------- لیست ادمین‌ها ----------------
+    if data == "admin_list":
+        return await list_admins_inline(update, context)
+
+    return CHOOSING
+
 async def list_admins_inline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
