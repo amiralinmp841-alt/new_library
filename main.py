@@ -126,9 +126,8 @@ logging.basicConfig(
     WAITING_UNBAN_USER,
     WAITING_BROADCAST_CONTENT,
     WAITING_SINGLE_USER_CONTENT,
-    WAITING_PICK_USER_FOR_MSG,
-    WAITING_USER_REPLY
-) = range(15)
+    WAITING_PICK_USER_FOR_MSG
+) = range(14)
 
 # ============ TELEGRAM USER API BACKUP CONFIG ============
 
@@ -920,7 +919,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["current_node"] = "root"
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.3.26)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.3.22)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -930,7 +929,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return CHOOSING
 
-async def admin_inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
@@ -938,6 +937,26 @@ async def admin_inline_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     userdata = load_userdata()
     sub_admins = userdata.get("sub_admins", [])
 
+    # ----  عمومی ---- ---- ----
+
+    if data == "reply_to_admin":
+        await query.message.reply_text("📝 پیام خود را بنویسید تا برای مدیریت ارسال شود:")
+        context.user_data["waiting_for_user_reply"] = True
+        return CHOOSING
+    
+    # در handle_navigation یا یک پیام‌گیر عمومی:
+    if context.user_data.get("waiting_for_user_reply"):
+        REPORT_GROUP_ID = os.getenv("REPORT_GROUP_ID")
+        user = update.effective_user
+        # ارسال به گروه
+        await context.bot.send_message(chat_id=REPORT_GROUP_ID, text=f"📩 پاسخ جدید از کاربر {user.full_name} (<code>{user.id}</code>):", parse_mode="HTML")
+        await context.bot.copy_message(chat_id=REPORT_GROUP_ID, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
+        
+        await update.message.reply_text("✅ پیام شما به مدیریت ارسال شد.")
+        context.user_data["waiting_for_user_reply"] = False
+        return CHOOSING
+
+    # ---- مخصوص ادمین ---- ---- ----
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
     if not is_admin:
@@ -1192,39 +1211,68 @@ async def admin_inline_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     return CHOOSING
 
-async def reply_to_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_msg_users_pick_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
     query = update.callback_query
-    await query.answer()
-    
-    await query.message.reply_text(
-        "📝 پیام خود را بنویسید (متن، عکس، فایل و...) تا برای مدیریت ارسال شود:\n"
-        "برای انصراف /cancel را بزنید."
-    )
-    return WAITING_USER_REPLY
+    userdata = load_userdata()
+    users = list(userdata.get("users", {}).values())
+    users.sort(key=lambda x: int(x.get("message_count", 0)), reverse=True)
 
-async def handle_user_reply_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    REPORT_GROUP_ID = os.getenv("REPORT_GROUP_ID")
-    user = update.effective_user
+    per_page = 10
+    total_pages = (len(users) + per_page - 1) // per_page
+    start = page * per_page
+    end = start + per_page
+    current_users = users[start:end]
+
+    buttons = []
+    for u in current_users:
+        name = u.get("full_name", "بدون نام")
+        uid = u.get("id")
+        buttons.append([InlineKeyboardButton(f"✉️ {name} ({uid})", callback_data=f"admin_send_msg_to_{uid}")])
+
+    nav_row = []
+    if page > 0: nav_row.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"admin_msg_pick_page_{page-1}"))
+    if page < total_pages - 1: nav_row.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"admin_msg_pick_page_{page+1}"))
+    if nav_row: buttons.append(nav_row)
+    buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_users_message")])
+
+    await query.message.edit_text("🎯 کاربر مورد نظر را برای ارسال پیام انتخاب کنید:", reply_markup=InlineKeyboardMarkup(buttons))
+    return CHOOSING
+
+async def receive_broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "❌ لغو":
+        await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_keyboard("root", True))
+        return CHOOSING
     
-    if not REPORT_GROUP_ID:
-        await update.message.reply_text("❌ خطا: گروه گزارشات تنظیم نشده است.")
+    if text == "✅ تایید و ارسال عمومی" or text == "✅ تایید و ارسال به کاربر":
+        messages = context.user_data.get("broadcast_messages", [])
+        if not messages:
+            await update.message.reply_text("⚠️ شما هیچ پیامی برای ارسال نفرستاده‌اید!")
+            return 
+        
+        target_mode = "all" if text == "✅ تایید و ارسال عمومی" else context.user_data.get("msg_target_id")
+        userdata = load_userdata()
+        targets = userdata.get("users", {}).keys() if target_mode == "all" else [target_mode]
+
+        # دکمه پاسخ به ادمین
+        reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("✍️ پاسخ به ادمین", callback_data="reply_to_admin")]])
+
+        count = 0
+        for uid in targets:
+            try:
+                await context.bot.send_message(chat_id=uid, text="🔔 <b>پیام از طرف ادمین:</b>", parse_mode="HTML")
+                for msg in messages:
+                    await context.bot.copy_message(chat_id=uid, from_chat_id=msg.chat_id, message_id=msg.message_id, reply_markup=reply_markup)
+                count += 1
+            except: continue
+        
+        await update.message.reply_text(f"✅ پیام شما با موفقیت به {count} کاربر ارسال شد.", reply_markup=get_keyboard("root", True))
         return CHOOSING
 
-    # ارسال سربرگ اطلاعات کاربر
-    safe_name = html.escape(user.full_name or "کاربر")
-    header = f"📩 <b>پاسخ جدید از کاربر:</b>\n👤 نام: {safe_name}\n🆔 آیدی: <code>{user.id}</code>"
-    
-    await context.bot.send_message(chat_id=REPORT_GROUP_ID, text=header, parse_mode="HTML")
-    
-    # کپی کردن خودِ پیام کاربر (هر مدیایی که باشد)
-    await context.bot.copy_message(
-        chat_id=REPORT_GROUP_ID,
-        from_chat_id=update.message.chat_id,
-        message_id=update.message.message_id
-    )
-    
-    await update.message.reply_text("✅ پیام شما با موفقیت برای مدیریت ارسال شد.")
-    return CHOOSING # یا بازگشت به منوی اصلی کاربر
+    # ذخیره پیام برای ارسال انبوه
+    context.user_data["broadcast_messages"].append(update.message)
+    await update.message.reply_text("📥 پیام دریافت شد. می‌توانید پیام‌های بیشتری بفرستید یا تایید را بزنید.")
+    return context.user_data.get("current_state") # ماندن در همان وضعیت
 
 async def list_admins_inline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1683,133 +1731,6 @@ async def show_unban_users_page(update: Update, context: ContextTypes.DEFAULT_TY
 
     context.user_data["admin_panel"] = "users"
     return WAITING_UNBAN_USER
-
-async def show_msg_users_pick_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
-    query = update.callback_query
-    users = get_all_users() # تابعی که لیست دیکشنری کاربران را از دیتابیس می‌گیرد
-    
-    per_page = 10
-    start = page * per_page
-    end = start + per_page
-    current_users = users[start:end]
-    
-    keyboard = []
-    for user in current_users:
-        user_id = user['user_id']
-        name = html.escape(user.get('full_name', 'Unknown'))
-        # نمایش نام و آیدی روی دکمه
-        button_text = f"👤 {name} ({user_id})"
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"admin_send_msg_to_{user_id}")])
-    
-    # دکمه‌های ناوبری (صفحه قبل/بعد)
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"admin_msg_pick_page_{page-1}"))
-    if end < len(users):
-        nav_buttons.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"admin_msg_pick_page_{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_users_message")])
-    
-    text = (
-        "🎯 **انتخاب کاربر برای ارسال پیام:**\n\n"
-        "می‌توانید کاربر را از لیست زیر انتخاب کنید یا **آیدی عددی** کاربر را همین‌جا بنویسید و ارسال کنید:"
-    )
-    
-    if query:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    else:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    
-    return WAITING_PICK_USER_FOR_MSG # وضعیت جدید برای دریافت آیدی دستی یا کلیک
-
-async def handle_user_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # اگر ورودی از دکمه بود
-    if update.callback_query:
-        target_id = update.callback_query.data.split("_")[-1]
-        await update.callback_query.answer()
-    else:
-        # اگر ورودی متنی (آیدی عددی) بود
-        target_id = update.message.text
-        if not target_id.isdigit():
-            await update.message.reply_text("❌ لطفا یک آیدی عددی معتبر وارد کنید یا از دکمه‌ها استفاده کنید.")
-            return WAITING_PICK_USER_FOR_MSG
-
-    context.user_data["msg_target_id"] = target_id
-    
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"👤 در حال ارسال پیام به کاربر <code>{target_id}</code>\n\nلطفاً پیام خود را بفرستید:",
-        reply_markup=ReplyKeyboardMarkup([["✅ تایید و ارسال به کاربر"], ["❌ لغو"]], resize_keyboard=True),
-        parse_mode="HTML"
-    )
-    return WAITING_SINGLE_USER_CONTENT
-
-async def receive_broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-
-    if text == "❌ لغو":
-        context.user_data.pop("broadcast_messages", None)
-        context.user_data.pop("msg_target_id", None)
-        await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_keyboard("root", True))
-        return CHOOSING
-
-    # مرحله تایید و ارسال
-    if text == "✅ تایید و ارسال عمومی" or text == "✅ تایید و ارسال به کاربر":
-        messages = context.user_data.get("broadcast_messages", [])
-        if not messages:
-            await update.message.reply_text("⚠️ شما هیچ پیامی برای ارسال نفرستاده‌اید!")
-            return WAITING_SINGLE_USER_CONTENT
-
-        target_id = context.user_data.get("msg_target_id")
-
-        # اگر برای یک کاربر خاص باشد
-        if target_id:
-            targets = [target_id]
-        else:
-            # ارسال عمومی
-            userdata = load_userdata()
-            targets = list(userdata.get("users", {}).keys())
-
-        reply_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✍️ پاسخ به ادمین", callback_data="reply_to_admin")]
-        ])
-
-        count = 0
-        for uid in targets:
-            try:
-                await context.bot.send_message(
-                    chat_id=uid,
-                    text="🔔 <b>پیام از طرف ادمین:</b>",
-                    parse_mode="HTML"
-                )
-                for msg in messages:
-                    await context.bot.copy_message(
-                        chat_id=uid,
-                        from_chat_id=msg.chat_id,
-                        message_id=msg.message_id,
-                        reply_markup=reply_markup
-                    )
-                count += 1
-            except Exception:
-                continue
-
-        # پاک کردن داده‌های موقت
-        context.user_data.pop("broadcast_messages", None)
-        context.user_data.pop("msg_target_id", None)
-
-        await update.message.reply_text(
-            f"✅ پیام شما با موفقیت به {count} کاربر ارسال شد.",
-            reply_markup=get_keyboard("root", True)
-        )
-        return CHOOSING
-
-    # اگر هنوز پیام‌ها را نفرستاده و فقط در حال جمع‌آوری محتواست
-    context.user_data.setdefault("broadcast_messages", []).append(update.message)
-    await update.message.reply_text("📥 پیام دریافت شد. می‌توانید پیام‌های بیشتری بفرستید یا تایید را بزنید.")
-    return WAITING_SINGLE_USER_CONTENT
 
 async def remove_temp_reply_keyboard_from_callback(query, text="⌨️ کیبورد موقت بسته شد."):
     """
@@ -2849,8 +2770,7 @@ def build_application():
         entry_points=[CommandHandler('start', start)],
         states={
             CHOOSING: [
-                CallbackQueryHandler(admin_inline_handler, pattern="^admin_"),
-                CallbackQueryHandler(reply_to_admin_callback, pattern="^reply_to_admin$"),
+                CallbackQueryHandler(inline_handler, pattern="^admin_"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation)
             ],
             WAITING_BUTTON_NAME: [
@@ -2880,11 +2800,11 @@ def build_application():
                 MessageHandler(filters.TEXT & (~filters.COMMAND), remove_sub_admin)
             ],
             WAITING_BAN_USER: [
-                CallbackQueryHandler(admin_inline_handler, pattern="^admin_"),
+                CallbackQueryHandler(inline_handler, pattern="^admin_"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), receive_ban_user_id)
             ],
             WAITING_UNBAN_USER: [
-                CallbackQueryHandler(admin_inline_handler, pattern="^admin_"),
+                CallbackQueryHandler(inline_handler, pattern="^admin_"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), receive_unban_user_id)
             ],
             WAITING_BROADCAST_CONTENT: [
@@ -2892,15 +2812,7 @@ def build_application():
             ],
             WAITING_SINGLE_USER_CONTENT: [
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_broadcast_content)
-            ],
-            WAITING_USER_REPLY: [
-                MessageHandler(filters.ALL & ~filters.COMMAND, handle_user_reply_to_admin),
-            ],
-            WAITING_PICK_USER_FOR_MSG: [
-                MessageHandler(filters.TEXT & (~filters.COMMAND), handle_user_id_input),
-                CallbackQueryHandler(admin_inline_handler, pattern="^admin_msg_pick_page_"),
-                CallbackQueryHandler(admin_inline_handler, pattern="^admin_send_msg_to_"),
-            ]  
+            ]
         },
         fallbacks=[CommandHandler('start', start)]
     )
