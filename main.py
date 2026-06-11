@@ -2757,6 +2757,7 @@ def build_application():
         entry_points=[CommandHandler('start', start)],
         states={
             CHOOSING: [
+                CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation)
             ],
