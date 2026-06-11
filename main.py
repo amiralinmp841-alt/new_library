@@ -125,7 +125,8 @@ logging.basicConfig(
     WAITING_UNBAN_USER,
     WAITING_BROADCAST_CONTENT,
     WAITING_SINGLE_USER_CONTENT,
-    WAITING_PICK_USER_FOR_MSG
+    WAITING_PICK_USER_FOR_MSG,
+    WAITING_CHAT_MESSAGE 
 ) = range(14)
 
 # ============ TELEGRAM USER API BACKUP CONFIG ============
@@ -846,6 +847,72 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return CHOOSING
 
+async def start_chat_with_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_user_activity(update, count_message=False)
+
+    user = update.effective_user
+    user_id = user.id
+
+    if is_user_banned(user_id):
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از این بخش را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return CHOOSING
+
+    # اگر گروه تنظیم نشده باشد
+    if not REPORT_GROUP_ID:
+        await update.message.reply_text("❌ گروه مدیریت تنظیم نشده است.")
+        return CHOOSING
+
+    # شروع فرایند چت
+    await update.message.reply_text(
+        "✉️ پیام خود را برای مدیریت ارسال کنید.\n"
+        "اگر منصرف شدید /cancel را بزنید.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    return WAITING_CHAT_MESSAGE
+
+async def receive_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.message
+
+    full_name = html.escape(user.full_name or "بدون نام")
+    username = user.username
+    username_text = f"@{html.escape(username)}" if username else "ندارد"
+    user_link = f'<a href="tg://user?id={user.id}">{full_name}</a>'
+
+    header = (
+        "📨 <b>پیام جدید برای مدیریت</b>\n\n"
+        f"👤 <b>کاربر:</b> {user_link}\n"
+        f"🆔 <b>آیدی عددی:</b> <code>{user.id}</code>\n"
+        f"🔗 <b>یوزرنیم:</b> <code>{username_text}</code>\n\n"
+        "📩 <b>محتوا:</b>"
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=REPORT_GROUP_ID,
+            text=header,
+            parse_mode="HTML"
+        )
+
+        # پیام اصلی را کپی کن
+        await context.bot.copy_message(
+            chat_id=REPORT_GROUP_ID,
+            from_chat_id=message.chat_id,
+            message_id=message.message_id
+        )
+
+        await update.message.reply_text("✅ پیام شما برای مدیریت ارسال شد.")
+
+    except Exception as e:
+        print("Failed to send chat message:", e)
+        await update.message.reply_text("❌ ارسال پیام با خطا مواجه شد.")
+
+    return CHOOSING
+
 async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE, node_id: str):
     """محتواهای موجود در نود فعلی را ارسال می‌کند"""
     set_report_page(context, node_id)
@@ -1034,7 +1101,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.3.25)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.2)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -3032,6 +3099,7 @@ def build_application():
         states={
             CHOOSING: [
                 CommandHandler("report", report_page),
+                CommandHandler("chat", start_chat_with_admin),
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation)
@@ -3082,6 +3150,10 @@ def build_application():
             ],
             WAITING_SINGLE_USER_CONTENT: [
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_broadcast_content)
+            ],
+            WAITING_CHAT_MESSAGE: [
+                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_chat_message),
+                CommandHandler("cancel", cancel)
             ]
         },
         fallbacks=[CommandHandler('start', start)]
