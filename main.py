@@ -1224,32 +1224,41 @@ async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return CHOOSING
 
-async def show_msg_users_pick_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
-    query = update.callback_query
-    userdata = load_userdata()
-    users = list(userdata.get("users", {}).values())
-    users.sort(key=lambda x: int(x.get("message_count", 0)), reverse=True)
+async def receive_broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "❌ لغو":
+        await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_keyboard("root", True))
+        return CHOOSING
+    
+    if text == "✅ تایید و ارسال عمومی" or text == "✅ تایید و ارسال به کاربر":
+        messages = context.user_data.get("broadcast_messages", [])
+        if not messages:
+            await update.message.reply_text("⚠️ شما هیچ پیامی برای ارسال نفرستاده‌اید!")
+            return 
+        
+        target_mode = "all" if text == "✅ تایید و ارسال عمومی" else context.user_data.get("msg_target_id")
+        userdata = load_userdata()
+        targets = userdata.get("users", {}).keys() if target_mode == "all" else [target_mode]
 
-    per_page = 10
-    total_pages = (len(users) + per_page - 1) // per_page
-    start = page * per_page
-    end = start + per_page
-    current_users = users[start:end]
+        # دکمه پاسخ به ادمین
+        reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("✍️ پاسخ به ادمین", callback_data="reply_to_admin")]])
 
-    buttons = []
-    for u in current_users:
-        name = u.get("full_name", "بدون نام")
-        uid = u.get("id")
-        buttons.append([InlineKeyboardButton(f"✉️ {name} ({uid})", callback_data=f"admin_send_msg_to_{uid}")])
+        count = 0
+        for uid in targets:
+            try:
+                await context.bot.send_message(chat_id=uid, text="🔔 <b>پیام از طرف ادمین:</b>", parse_mode="HTML")
+                for msg in messages:
+                    await context.bot.copy_message(chat_id=uid, from_chat_id=msg.chat_id, message_id=msg.message_id, reply_markup=reply_markup)
+                count += 1
+            except: continue
+        
+        await update.message.reply_text(f"✅ پیام شما با موفقیت به {count} کاربر ارسال شد.", reply_markup=get_keyboard("root", True))
+        return CHOOSING
 
-    nav_row = []
-    if page > 0: nav_row.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"admin_msg_pick_page_{page-1}"))
-    if page < total_pages - 1: nav_row.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"admin_msg_pick_page_{page+1}"))
-    if nav_row: buttons.append(nav_row)
-    buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_users_message")])
-
-    await query.message.edit_text("🎯 کاربر مورد نظر را برای ارسال پیام انتخاب کنید:", reply_markup=InlineKeyboardMarkup(buttons))
-    return CHOOSING
+    # ذخیره پیام برای ارسال انبوه
+    context.user_data["broadcast_messages"].append(update.message)
+    await update.message.reply_text("📥 پیام دریافت شد. می‌توانید پیام‌های بیشتری بفرستید یا تایید را بزنید.")
+    return context.user_data.get("current_state") # ماندن در همان وضعیت
 
 async def show_msg_users_pick_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     query = update.callback_query
