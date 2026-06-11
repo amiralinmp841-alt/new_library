@@ -847,6 +847,36 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return CHOOSING
 
+async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_user_activity(update, count_message=False)
+    
+    user_id = update.effective_user.id
+    if is_user_banned(user_id):
+        await update.message.reply_text("⛔️ شما بن شده‌اید.")
+        return CHOOSING
+
+    db = load_db()
+    
+    # اولویت با صفحه‌ای است که کاربر در آن است
+    node_id = context.user_data.get("current_report_node") or context.user_data.get("current_node", "root")
+
+    if node_id not in db:
+        await update.message.reply_text("❌ صفحه فعلی پیدا نشد.")
+        return CHOOSING
+
+    bot_username = context.bot.username
+    deep_link = f"https://t.me/{bot_username}?start={node_id}"
+    page_name = html.escape(db[node_id].get("name", "بدون نام"))
+
+    msg = (
+        f"🔗 <b>دیپ‌لینک صفحه:</b> <code>{page_name}</code>\n\n"
+        f"برای اشتراک‌گذاری، روی لینک زیر بزنید:\n"
+        f"<code>{html.escape(deep_link)}</code>"
+    )
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+    return CHOOSING
+
 async def start_chat_with_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=False)
 
@@ -1116,7 +1146,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.2)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.3)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -3114,6 +3144,7 @@ def build_application():
         states={
             CHOOSING: [
                 CommandHandler("report", report_page),
+                CommandHandler("deeplink", deeplink_command),
                 CommandHandler("chat", start_chat_with_admin),
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
