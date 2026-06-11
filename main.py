@@ -1862,10 +1862,22 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("waiting_for_user_reply"):
         REPORT_GROUP_ID = os.getenv("REPORT_GROUP_ID")
         user = update.effective_user
-        # ارسال به گروه
-        await context.bot.send_message(chat_id=REPORT_GROUP_ID, text=f"📩 پاسخ جدید از کاربر {user.full_name} (<code>{user.id}</code>):", parse_mode="HTML")
-        await context.bot.copy_message(chat_id=REPORT_GROUP_ID, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
-        
+    
+        safe_name = html.escape(user.full_name or "کاربر")
+        user_link = f'<a href="tg://user?id={user.id}">{safe_name}</a>'
+    
+        await context.bot.send_message(
+            chat_id=REPORT_GROUP_ID,
+            text=f"📩 پاسخ جدید از طرف {user_link} (<code>{user.id}</code>):",
+            parse_mode="HTML"
+        )
+    
+        await context.bot.copy_message(
+            chat_id=REPORT_GROUP_ID,
+            from_chat_id=update.message.chat_id,
+            message_id=update.message.message_id
+        )
+    
         await update.message.reply_text("✅ پیام شما به مدیریت ارسال شد.")
         context.user_data["waiting_for_user_reply"] = False
         return CHOOSING
