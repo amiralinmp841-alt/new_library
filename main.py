@@ -1858,6 +1858,17 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("شما در صفحه اصلی هستید.", reply_markup=get_keyboard('root', is_admin))
         return CHOOSING
 
+    # --- Admin Accessibility --- 
+    if is_admin and text == os.getenv("ADMIN_ACCESSIBILITY_NAME"):
+        context.user_data["admin_panel"] = "access"
+    
+        await update.message.reply_text(
+            "🔐 پنل مدیریت:",
+            reply_markup=get_admin_access_inline_keyboard()
+        )
+    
+        return CHOOSING
+        
     # در handle_navigation یا یک پیام‌گیر عمومی:
     if context.user_data.get("waiting_for_user_reply"):
         REPORT_GROUP_ID = os.getenv("REPORT_GROUP_ID")
