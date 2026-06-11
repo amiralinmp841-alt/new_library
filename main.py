@@ -920,7 +920,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["current_node"] = "root"
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.3.25)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.3.26)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -1723,7 +1723,7 @@ async def show_msg_users_pick_page(update: Update, context: ContextTypes.DEFAULT
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
-    return WAITING_USER_ID_FOR_MSG # وضعیت جدید برای دریافت آیدی دستی یا کلیک
+    return WAITING_PICK_USER_FOR_MSG # وضعیت جدید برای دریافت آیدی دستی یا کلیک
 
 async def handle_user_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # اگر ورودی از دکمه بود
@@ -1735,7 +1735,7 @@ async def handle_user_id_input(update: Update, context: ContextTypes.DEFAULT_TYP
         target_id = update.message.text
         if not target_id.isdigit():
             await update.message.reply_text("❌ لطفا یک آیدی عددی معتبر وارد کنید یا از دکمه‌ها استفاده کنید.")
-            return WAITING_USER_ID_FOR_MSG
+            return WAITING_PICK_USER_FOR_MSG
 
     context.user_data["msg_target_id"] = target_id
     
@@ -2867,7 +2867,12 @@ def build_application():
             ],
             WAITING_USER_REPLY: [
                 MessageHandler(filters.ALL & ~filters.COMMAND, handle_user_reply_to_admin),
-            ]
+            ],
+            WAITING_PICK_USER_FOR_MSG: [
+                MessageHandler(filters.TEXT & (~filters.COMMAND), handle_user_id_input),
+                CallbackQueryHandler(admin_inline_handler, pattern="^admin_msg_pick_page_"),
+                CallbackQueryHandler(admin_inline_handler, pattern="^admin_send_msg_to_"),
+            ]  
         },
         fallbacks=[CommandHandler('start', start)]
     )
