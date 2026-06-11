@@ -126,8 +126,9 @@ logging.basicConfig(
     WAITING_UNBAN_USER,
     WAITING_BROADCAST_CONTENT,
     WAITING_SINGLE_USER_CONTENT,
-    WAITING_PICK_USER_FOR_MSG
-) = range(14)
+    WAITING_PICK_USER_FOR_MSG,
+    WAITING_USER_REPLY
+) = range(15)
 
 # ============ TELEGRAM USER API BACKUP CONFIG ============
 
@@ -2821,6 +2822,7 @@ def build_application():
         states={
             CHOOSING: [
                 CallbackQueryHandler(admin_inline_handler, pattern="^admin_"),
+                CallbackQueryHandler(reply_to_admin_callback, pattern="^reply_to_admin$"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation)
             ],
             WAITING_BUTTON_NAME: [
