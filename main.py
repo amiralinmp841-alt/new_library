@@ -1749,39 +1749,67 @@ async def handle_user_id_input(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def receive_broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+
     if text == "❌ لغو":
+        context.user_data.pop("broadcast_messages", None)
+        context.user_data.pop("msg_target_id", None)
         await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_keyboard("root", True))
         return CHOOSING
-    
+
+    # مرحله تایید و ارسال
     if text == "✅ تایید و ارسال عمومی" or text == "✅ تایید و ارسال به کاربر":
         messages = context.user_data.get("broadcast_messages", [])
         if not messages:
             await update.message.reply_text("⚠️ شما هیچ پیامی برای ارسال نفرستاده‌اید!")
-            return 
-        
-        target_mode = "all" if text == "✅ تایید و ارسال عمومی" else context.user_data.get("msg_target_id")
-        userdata = load_userdata()
-        targets = userdata.get("users", {}).keys() if target_mode == "all" else [target_mode]
+            return WAITING_SINGLE_USER_CONTENT
 
-        # دکمه پاسخ به ادمین
-        reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("✍️ پاسخ به ادمین", callback_data="reply_to_admin")]])
+        target_id = context.user_data.get("msg_target_id")
+
+        # اگر برای یک کاربر خاص باشد
+        if target_id:
+            targets = [target_id]
+        else:
+            # ارسال عمومی
+            userdata = load_userdata()
+            targets = list(userdata.get("users", {}).keys())
+
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✍️ پاسخ به ادمین", callback_data="reply_to_admin")]
+        ])
 
         count = 0
         for uid in targets:
             try:
-                await context.bot.send_message(chat_id=uid, text="🔔 <b>پیام از طرف ادمین:</b>", parse_mode="HTML")
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text="🔔 <b>پیام از طرف ادمین:</b>",
+                    parse_mode="HTML"
+                )
                 for msg in messages:
-                    await context.bot.copy_message(chat_id=uid, from_chat_id=msg.chat_id, message_id=msg.message_id, reply_markup=reply_markup)
+                    await context.bot.copy_message(
+                        chat_id=uid,
+                        from_chat_id=msg.chat_id,
+                        message_id=msg.message_id,
+                        reply_markup=reply_markup
+                    )
                 count += 1
-            except: continue
-        
-        await update.message.reply_text(f"✅ پیام شما با موفقیت به {count} کاربر ارسال شد.", reply_markup=get_keyboard("root", True))
+            except Exception:
+                continue
+
+        # پاک کردن داده‌های موقت
+        context.user_data.pop("broadcast_messages", None)
+        context.user_data.pop("msg_target_id", None)
+
+        await update.message.reply_text(
+            f"✅ پیام شما با موفقیت به {count} کاربر ارسال شد.",
+            reply_markup=get_keyboard("root", True)
+        )
         return CHOOSING
 
-    # ذخیره پیام برای ارسال انبوه
-    context.user_data["broadcast_messages"].append(update.message)
+    # اگر هنوز پیام‌ها را نفرستاده و فقط در حال جمع‌آوری محتواست
+    context.user_data.setdefault("broadcast_messages", []).append(update.message)
     await update.message.reply_text("📥 پیام دریافت شد. می‌توانید پیام‌های بیشتری بفرستید یا تایید را بزنید.")
-    return context.user_data.get("current_state") # ماندن در همان وضعیت
+    return WAITING_SINGLE_USER_CONTENT
 
 async def remove_temp_reply_keyboard_from_callback(query, text="⌨️ کیبورد موقت بسته شد."):
     """
