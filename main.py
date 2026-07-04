@@ -1154,7 +1154,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.4)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.5)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2206,25 +2206,28 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if text == "🔙 بازگشت":
         parent = db[current_node_id].get('parent')
-    
-        if parent:
-            context.user_data['current_node'] = parent
-            set_report_page(context, parent)
-    
-            await update.message.reply_text(
-                "بازگشت به عقب.",
-                reply_markup=get_keyboard(parent, is_admin)
-            )
-        else:
-            context.user_data['current_node'] = 'root'
-            set_report_page(context, "root")
-    
-            await update.message.reply_text(
-                "شما در صفحه اصلی هستید.",
-                reply_markup=get_keyboard('root', is_admin)
-            )
-    
+        
+        # تعیین نود مقصد
+        target_node = parent if parent else 'root'
+        context.user_data['current_node'] = target_node
+        set_report_page(context, target_node)
+        
+        bot_username = context.bot.username
+        path_str = get_breadcrumb_path(target_node, db, bot_username)
+        
+        # متن مناسب برای بازگشت
+        folder_name = db[target_node]['name'] if target_node != 'root' else "صفحه اصلی"
+        header_text = f"📂 بازگشت به {folder_name}" if target_node != 'root' else "🏠 صفحه اصلی"
+
+        await update.message.reply_text(
+            f"{header_text}\n"
+            f"🗺 مسیر: {path_str}",
+            reply_markup=get_keyboard(target_node, is_admin),
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
         return CHOOSING
+
     
     # --- Admin Accessibility --- 
     if is_admin and text == os.getenv("ADMIN_ACCESSIBILITY_NAME"):
@@ -2537,7 +2540,27 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
             # ✅ این صفحه برای report ذخیره شود
             set_report_page(context, child_id)
-    
+
+            # --- شروع تغییرات سیستم مسیر ---
+            bot_username = context.bot.username
+            path_str = get_breadcrumb_path(child_id, db, bot_username)
+            
+            # اگر پوشه فرزند داشته باشد (پوشه است)
+            if child_node.get("children"):
+                context.user_data['current_node'] = child_id
+                
+                await update.message.reply_text(
+                    f"📂 {child_node['name']}\n"
+                    f"🗺 مسیر: {path_str}",
+                    reply_markup=get_keyboard(child_id, is_admin),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+            else:
+                # اگر صرفا محتوا دارد (پوشه نیست)، هدر مسیر را نشان نده
+                await send_node_contents(update, context, child_id)
+            # --- پایان تغییرات سیستم مسیر ---
+
             # 👤 کاربر عادی + دکمه بدون فرزند
             if not is_admin and not child_node.get("children"):
                 # فقط محتوا را نمایش بده، بدون تغییر صفحه
@@ -2902,6 +2925,26 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === ADMIN ACTIONS HANDLERS END === ADMIN ACTIONS HANDLERS === ADMIN ACTIONS HANDLERS END === ADMIN ACTIONS HANDLERS END === ADMIN ACTIONS HANDLERS END === ADMIN ACTIONS HANDLERS END= 
 
+def get_breadcrumb_path(node_id, db, bot_username):
+    """تولید مسیر لینک‌دار از روت تا نود فعلی"""
+    path_parts = []
+    curr_id = node_id
+    
+    # پیمایش به سمت بالا تا رسیدن به روت
+    while curr_id and curr_id != 'root' and curr_id in db:
+        name = db[curr_id]['name']
+        # لینک مستقیم به نود
+        link = f"https://t.me/{bot_username}?start={curr_id}"
+        path_parts.append(f'<a href="{link}">{name}</a>')
+        curr_id = db[curr_id].get('parent')
+    
+    # اضافه کردن آیکون خانه
+    path_parts.append(f'<a href="https://t.me/{bot_username}?start=root">🏠</a>')
+    
+    # معکوس کردن لیست برای نمایش درست (از روت به فرزند)
+    return " ⬅️ ".join(reversed(path_parts))
+
+
 def is_valid_node_id(text, db):
     return text in db and isinstance(db[text], dict)
 
@@ -2916,8 +2959,6 @@ async def show_reorder_keyboard(update, context, db):
         f"ترتیب جدید را انتخاب کنید ({len(remaining)} دکمه باقی مانده):",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
-
-
 
 
 async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
