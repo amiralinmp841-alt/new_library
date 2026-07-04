@@ -1282,7 +1282,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.6.1)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.6.2)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2683,25 +2683,25 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⛔️ چیزی برای بازگشت وجود ندارد.")
                 return CHOOSING
         
-            # ذخیره وضعیت فعلی دیتابیس در future
             future.append(copy.deepcopy(load_db()))
         
-            # لود کردن دیتابیس قبلی
             last_db = history.pop()
-            save_db(last_db)
-            
-            # پیدا کردن مناسب‌ترین نود پس از بازگرداندن بکاپ
+        
             current_node = context.user_data.get("current_node", "root")
             valid_node = find_nearest_valid_node(last_db, current_node)
-            
-            # ذخیره نود معتبر جدید در سشن کاربر
             context.user_data["current_node"] = valid_node
         
-            # دریافت نام پوشه و مسیر آن
             bot_username = context.bot.username
             path_str = get_breadcrumb_path(valid_node, last_db, bot_username)
             node_name = last_db.get(valid_node, {}).get("name", "خانه")
-
+            node_link = get_link(valid_node, node_name, bot_username)
+        
+            desc = f"↩️ آخرین تغییر بازگردانده شد. پوشه فعلی: {node_link}"
+            caption = format_admin_log(update.effective_user, desc)
+            set_pending_caption(context, caption)
+        
+            save_db(last_db, context=context)
+        
             await update.message.reply_text(
                 f"↩️ آخرین تغییر بازگردانده شد.\n"
                 f"📂 پوشه فعلی: {node_name}\n"
@@ -2725,7 +2725,6 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
             # لود کردن دیتابیس بعدی
             next_db = future.pop()
-            save_db(next_db)
         
             # پیدا کردن مناسب‌ترین نود پس از بازگرداندن بکاپ
             current_node = context.user_data.get("current_node", "root")
@@ -2738,7 +2737,13 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bot_username = context.bot.username
             path_str = get_breadcrumb_path(valid_node, next_db, bot_username)
             node_name = next_db.get(valid_node, {}).get("name", "خانه")
+            node_link = get_link(valid_node, node_name, bot_username)
+            desc = f"↪️ تغییر دوباره اعمال شد. پوشه فعلی: {node_link}"
+            caption = format_admin_log(update.effective_user, desc)
+            set_pending_caption(context, caption)
 
+            save_db(next_db, context=context)
+            
             await update.message.reply_text(
                 f"↪️ تغییر دوباره اعمال شد.\n"
                 f"📂 پوشه فعلی: {node_name}\n"
