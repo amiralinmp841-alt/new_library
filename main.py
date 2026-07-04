@@ -1258,7 +1258,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.18)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.19)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2364,7 +2364,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
             return_message = (
                 f"📂 بازگشت به {folder_name}\n"
-                f"🗺 مسیر: {path_str}"
+                f"<blockquote expandable>🗺 مسیر: {path_str}</blockquote>"
             )
     
         await update.message.reply_text(
@@ -2751,7 +2751,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
             await update.message.reply_text(
                 f"📂 {child_node['name']}\n"
-                f"🗺 مسیر: {path_str}",
+                f"<blockquote expandable>🗺 مسیر: {path_str}</blockquote>"
                 reply_markup=get_keyboard(child_id, is_admin),
                 parse_mode="HTML",
                 disable_web_page_preview=True
