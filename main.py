@@ -91,6 +91,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 TOKEN = os.getenv("TOKEN")
 
 REPORT_GROUP_ID = int(os.getenv("REPORT_GROUP_ID", "0") or "0")
+MASSAGE_GROUP_ID = int(os.getenv("MASSAGE_GROUP_ID", "0") or "0")
 
 ADMIN_IDS = []
 if os.getenv("ADMIN_IDS"):
@@ -831,6 +832,13 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔗 <b>دیپ‌لینک صفحه:</b>\n{html.escape(deep_link)}"
     )
 
+    user_reply = (
+        "✅ گزارش شما با موفقیت برای مدیریت ارسال شد.\n\n"
+        f"📄 <b>نام صفحه:</b> {page_name}\n"
+        f"📂 <b>مسیر صفحه:</b>\n{path_text}\n\n"
+        f"🔗 <b>دیپ‌لینک صفحه:</b>\n<code>{html.escape(deep_link)}</code>"
+    )
+    
     try:
         await context.bot.send_message(
             chat_id=REPORT_GROUP_ID,
@@ -839,7 +847,7 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True
         )
 
-        await update.message.reply_text("✅ گزارش شما برای مدیریت ارسال شد.")
+        await update.message.reply_text(user_reply, parse_mode="HTML")
 
     except Exception as e:
         print("Failed to send report:", e)
@@ -891,7 +899,7 @@ async def start_chat_with_admin(update: Update, context: ContextTypes.DEFAULT_TY
         return CHOOSING
 
     # اگر گروه تنظیم نشده باشد
-    if not REPORT_GROUP_ID:
+    if not MASSAGE_GROUP_ID:
         await update.message.reply_text("❌ گروه مدیریت تنظیم نشده است.")
         return CHOOSING
 
@@ -934,14 +942,14 @@ async def receive_chat_message(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         # ۱. ارسال مشخصات کاربر به گروه
         await context.bot.send_message(
-            chat_id=REPORT_GROUP_ID,
+            chat_id=MASSAGE_GROUP_ID,
             text=header,
             parse_mode="HTML"
         )
 
         # ۲. کپی پیام کاربر (کپی کامل هرگونه فایل، عکس، ویدیو، گیف، استیکر و متن)
         await context.bot.copy_message(
-            chat_id=REPORT_GROUP_ID,
+            chat_id=MASSAGE_GROUP_ID,
             from_chat_id=message.chat_id,
             message_id=message.message_id
         )
@@ -1146,7 +1154,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.3)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.4)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2231,20 +2239,20 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # در handle_navigation یا یک پیام‌گیر عمومی:
     if context.user_data.get("waiting_for_user_reply"):
-        REPORT_GROUP_ID = os.getenv("REPORT_GROUP_ID")
+        MASSAGE_GROUP_ID = os.getenv("MASSAGE_GROUP_ID")
         user = update.effective_user
     
         safe_name = html.escape(user.full_name or "کاربر")
         user_link = f'<a href="tg://user?id={user.id}">{safe_name}</a>'
     
         await context.bot.send_message(
-            chat_id=REPORT_GROUP_ID,
+            chat_id=MASSAGE_GROUP_ID,
             text=f"📩 پاسخ جدید از طرف {user_link} (<code>{user.id}</code>):",
             parse_mode="HTML"
         )
     
         await context.bot.copy_message(
-            chat_id=REPORT_GROUP_ID,
+            chat_id=MASSAGE_GROUP_ID,
             from_chat_id=update.message.chat_id,
             message_id=update.message.message_id
         )
