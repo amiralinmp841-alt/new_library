@@ -379,6 +379,7 @@ def track_user_activity(update: Update, count_message=True):
     - آیدی عددی
     - تعداد پیام‌ها / دستورها
     - وضعیت بن
+    - حفظ سایر تنظیمات مثل smart_search_disabled
     """
 
     user = update.effective_user
@@ -396,17 +397,24 @@ def track_user_activity(update: Update, count_message=True):
     full_name = user.full_name or "بدون نام"
     username = user.username
 
-    users[user_id] = {
-        "id": user.id,
-        "full_name": full_name,
-        "username": username,
-        "message_count": old_count + 1 if count_message else old_count,
-        "banned": bool(old_data.get("banned", False)),
-        "first_seen": old_data.get("first_seen") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "last_seen": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
+    # به جای overwrite کامل، از اطلاعات قبلی کپی بگیر
+    user_record = old_data.copy()
 
-    new_count = users[user_id]["message_count"]
+    # فقط فیلدهای لازم را آپدیت کن
+    user_record["id"] = user.id
+    user_record["full_name"] = full_name
+    user_record["username"] = username
+    user_record["message_count"] = old_count + 1 if count_message else old_count
+    user_record["banned"] = bool(old_data.get("banned", False))
+    user_record["first_seen"] = old_data.get("first_seen") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    user_record["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # اگر از قبل وجود نداشت، پیش‌فرض سرچ هوشمند را روشن نگه دار
+    user_record["smart_search_disabled"] = old_data.get("smart_search_disabled", False)
+
+    users[user_id] = user_record
+
+    new_count = user_record["message_count"]
 
     # برای سبک شدن:
     # هر پیام فقط لوکال ذخیره می‌شود.
@@ -1196,7 +1204,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.12)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.13)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
