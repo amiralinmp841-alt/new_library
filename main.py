@@ -621,6 +621,18 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         db[current_node_id]["style"] = new_style
 
+    old_color = db[current_node_id].get("style", "بدون رنگ")
+    new_color_name = color_names[command]
+    bot_username = context.bot.username
+    node_name = db[current_node_id]["name"]
+    node_link = get_link(current_node_id, node_name, bot_username)
+    desc = (
+        f"🎨 رنگ پوشه {node_link} "
+        f"از «{old_color}» به «{new_color_name}» تغییر کرد."
+    )
+    caption = format_admin_log(update.effective_user, desc)
+    set_pending_caption(context, caption)
+
     save_db(db)
 
     parent_id = db[current_node_id].get("parent", "root")
@@ -632,21 +644,6 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/red": "قرمز",
         "/none": "بدون رنگ"
     }
-
-    old_color = db[current_node_id].get("style", "بدون رنگ")
-    new_color_name = color_names[command]
-    
-    bot_username = context.bot.username
-    node_name = db[current_node_id]["name"]
-    node_link = get_link(current_node_id, node_name, bot_username)
-    
-    desc = (
-        f"🎨 رنگ پوشه {node_link} "
-        f"از «{old_color}» به «{new_color_name}» تغییر کرد."
-    )
-    
-    caption = format_admin_log(update.effective_user, desc)
-    set_pending_caption(context, caption)
     
     await update.message.reply_text(
         f"✅ رنگ این پوشه به «{color_names[command]}» تغییر یافت.",
