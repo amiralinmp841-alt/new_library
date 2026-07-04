@@ -388,6 +388,10 @@ def track_user_activity(update: Update, count_message=True):
 
     user_id = str(user.id)
 
+    # 🔥 مهم: اگر بن شده باشد، هیچ تغییر در userdata و فایل‌ها انجام نمی‌شود.
+    if is_user_banned(user.id):
+        return
+
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
@@ -1588,7 +1592,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         """🕊 به ربات کتابخانه دانشگاه خوش آمدید.
     
-    📌 نسخه: V4.6.11
+    📌 نسخه: V4.6.12
     
     🔍 جستجوی فایل‌ها
     برای پیدا کردن فایل موردنظر، کافی است نام یا توضیح آن را به‌صورت متنی ارسال کنید؛ برای مثال:
