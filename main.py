@@ -81,18 +81,6 @@ PORT = int(os.environ.get("PORT", 10000))
 # ------ userdata -------
 USERDATA_FILE = "/tmp/userdata.json"
 
-# --- admin pannel
-ADMIN_ACCESSIBILITY_NAME = os.getenv("ADMIN_ACCESSIBILITY_NAME")
-
-# --- webhook_url مخصوص رندر
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-
-# توکن و آیدی عددی ادمین از متغیرهای محیطی خوانده می‌شود
-TOKEN = os.getenv("TOKEN")
-
-REPORT_GROUP_ID = int(os.getenv("REPORT_GROUP_ID", "0") or "0")
-MASSAGE_GROUP_ID = int(os.getenv("MASSAGE_GROUP_ID", "0") or "0")
-
 ADMIN_IDS = []
 if os.getenv("ADMIN_IDS"):
     ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS").split(",")))
@@ -131,7 +119,8 @@ logging.basicConfig(
 ) = range(15)
 
 # ============ TELEGRAM USER API BACKUP CONFIG ============
-
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+TOKEN = os.getenv("TOKEN")
 DB_FILE = "/tmp/database.json"
 USERDATA_FILE = "/tmp/userdata.json"
 
@@ -142,6 +131,10 @@ TG_SESSION_STRING = os.getenv("TG_SESSION_STRING")
 DB_BACKUP_CHAT_ID = int(os.getenv("DB_BACKUP_CHAT_ID", "0"))
 USERDATA_BACKUP_CHAT_ID = int(os.getenv("USERDATA_BACKUP_CHAT_ID", "0"))
 
+ADMIN_ACCESSIBILITY_NAME = os.getenv("ADMIN_ACCESSIBILITY_NAME")
+
+REPORT_GROUP_ID = int(os.getenv("REPORT_GROUP_ID", "0") or "0")
+MASSAGE_GROUP_ID = int(os.getenv("MASSAGE_GROUP_ID", "0") or "0")
 
 # ============ TELETHON SEPARATE EVENT LOOP ============
 
@@ -261,11 +254,12 @@ def download_db_from_telegram():
     )
 
 
-def upload_db_to_telegram():
+def upload_db_to_telegram(caption="database.json"):
     return upload_file_to_telegram(
         chat_id=DB_BACKUP_CHAT_ID,
         file_path=DB_FILE,
-        caption="database.json"
+        caption=caption,
+        parse_mode="HTML"
     )
 
 
@@ -299,20 +293,24 @@ def load_db():
         return {}
 
 
-def save_db(data):
-    # ذخیره لوکال
+def save_db(data, context=None):
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-
         print("💾 DB saved locally")
-
     except Exception as e:
         print("❌ Failed to save DB locally:", e)
         return False
 
-    # ارسال به گروه تلگرام
-    return upload_db_to_telegram()
+    # کپشن ادمین اگر وجود داشت → استفاده کن
+    caption = None
+    if context:
+        caption = pop_pending_caption(context)
+
+    if caption is None:
+        caption = "database.json"
+
+    return upload_db_to_telegram(caption=caption)
 
 
 # ============ USERDATA BACKUP WITH TELEGRAM ============
@@ -548,6 +546,36 @@ def build_user_action_keyboard(users_list, action="ban", page=0, page_size=8):
 
     return InlineKeyboardMarkup(keyboard)
 
+# ساخت لینک پوشه (دیپ‌لینک)
+def get_link(node_id, text, bot_username):
+    url = f"https://t.me/{bot_username}?start={node_id}"
+    return f"<a href='{url}'>{text}</a>"
+
+# ساخت لینک پروفایل ادمین
+def get_admin_link(admin_user):
+    return f"<a href='tg://user?id={admin_user.id}'>{admin_user.full_name}</a>"
+
+# ساخت کپشن کامل لاگ
+def format_admin_log(admin_user, description):
+    admin_link = get_admin_link(admin_user)
+    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
+
+    return (
+        f"👑 <b>گزارش تغییرات دیتابیس</b>\n\n"
+        f"👤 ادمین: {admin_link}\n"
+        f"🆔 ID: <code>{admin_user.id}</code>\n"
+        f"👤 Username: {username}\n"
+        f"--------------------------\n"
+        f"{description}"
+    )
+
+# ذخیره کپشن در کانتکست (برای استفاده داخل save_db)
+def set_pending_caption(context, caption):
+    context.user_data["pending_caption"] = caption
+
+def pop_pending_caption(context):
+    return context.user_data.pop("pending_caption", None)
+
 #------ دکمه های رنگی ----------
 async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -604,6 +632,21 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/none": "بدون رنگ"
     }
 
+    old_color = db[current_node_id].get("style", "بدون رنگ")
+    new_color_name = color_names[command]
+    
+    bot_username = context.bot.username
+    node_name = db[current_node_id]["name"]
+    node_link = get_link(current_node_id, node_name, bot_username)
+    
+    desc = (
+        f"🎨 رنگ پوشه {node_link} "
+        f"از «{old_color}» به «{new_color_name}» تغییر کرد."
+    )
+    
+    caption = format_admin_log(update.effective_user, desc)
+    set_pending_caption(context, caption)
+    
     await update.message.reply_text(
         f"✅ رنگ این پوشه به «{color_names[command]}» تغییر یافت.",
         reply_markup=get_keyboard(parent_id, True)
@@ -1204,7 +1247,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.15)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.16)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2409,7 +2452,15 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
                 # حذف بازگشتی کل درخت
                 delete_node_recursive(db, target_id)
-            
+
+                bot_username = context.bot.username
+                parent_name = db[current_node_id]["name"]
+                parent_link = get_link(current_node_id, parent_name, bot_username)
+                child_link = get_link(target_id, target_name, bot_username)
+                desc = f"❌ پوشه {child_link} از {parent_link} حذف شد."
+                caption = format_admin_log(update.effective_user, desc)
+                set_pending_caption(context, caption)
+                
                 save_db(db)
                 await update.message.reply_text(
                     f"دکمه '{target_name}' و تمام زیرمجموعه‌هایش حذف شد.",
@@ -2468,6 +2519,14 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "🧹 حذف محتوای صفحه":
             push_admin_history(context, db)
             db[current_node_id]["contents"] = []
+
+            bot_username = context.bot.username
+            node_name = db[current_node_id]["name"]
+            node_link = get_link(current_node_id, node_name, bot_username)
+            desc = f"🧹 محتوای پوشه {node_link} حذف شد."
+            caption = format_admin_log(update.effective_user, desc)
+            set_pending_caption(context, caption)
+            
             save_db(db)
             await update.message.reply_text(
                 "🧹 محتوای این صفحه حذف شد.",
@@ -2562,6 +2621,14 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # ✅ پایان انتخاب و ذخیره چیدمان جدید
                 push_admin_history(context, db)
                 db[current_node_id]["children"] = result
+
+                bot_username = context.bot.username
+                node_name = db[current_node_id]["name"]
+                node_link = get_link(current_node_id, node_name, bot_username)
+                desc = f"🔀 چیدمان دکمه‌های پوشه {node_link} تغییر کرد."
+                caption = format_admin_log(update.effective_user, desc)
+                set_pending_caption(context, caption)
+                
                 save_db(db)
         
                 for key in ["reorder_remaining", "reorder_result", "reorder_mode"]:
@@ -2712,6 +2779,16 @@ async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if target_id in db:
         push_admin_history(context, db)  # 👈 اینجا
         db[target_id]["name"] = new_name
+
+        old_name = db[target_id]["name"]
+        new_name = update.message.text
+        bot_username = context.bot.username
+        old_link = get_link(target_id, old_name, bot_username)
+        new_link = get_link(target_id, new_name, bot_username)
+        desc = f"📝 نام پوشه {old_link} به {new_link} تغییر کرد."
+        caption = format_admin_log(update.effective_user, desc)
+        set_pending_caption(context, caption)
+
         save_db(db)
 
     current = context.user_data.get("current_node", "root")
@@ -3119,6 +3196,7 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = load_db()
     current_node_id = context.user_data.get('current_node', 'root')
+    bot_username = context.bot.username
 
     # 🧠 اگر هش معتبر بود → کپی کامل نود
     if is_valid_node_id(text, db):
@@ -3134,7 +3212,7 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "parent": new_parent,
                 "children": [],
                 "contents": old.get("contents", []).copy(),
-                "style": old.get("style")  # <--- این خط را اضافه کن
+                "style": old.get("style")
             }
             
             for child in old.get("children", []):
@@ -3143,10 +3221,32 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             return new_id
 
-        push_admin_history(context, db)  # 👈 اینجا
+        push_admin_history(context, db)
         new_root_id = clone_node(source_id, current_node_id)
         db[current_node_id]["children"].append(new_root_id)
-        save_db(db)
+        
+        # --- سیستم لاگ‌گیری برای حالت کپی با هش ---
+        parent_name = db[current_node_id]["name"]
+        parent_link = get_link(current_node_id, parent_name, bot_username)
+        
+        copied_node_name = db[new_root_id]["name"]
+        copied_node_link = get_link(new_root_id, copied_node_name, bot_username)
+        
+        desc = f"📋 پوشه {copied_node_link} (کپی‌شده از روی هش) به {parent_link} اضافه شد."
+        caption = format_admin_log(update.effective_user, desc)
+        set_pending_caption(context, caption)
+        
+        # ذخیره دیتابیس با اعمال کپشن
+        save_db(db, context=context)
+
+        # افزایش آمار دکمه‌های ادمین
+        userdata = load_userdata()
+        if "sub_admins_buttons" not in userdata:
+            userdata["sub_admins_buttons"] = {}
+        user_id = update.effective_user.id
+        current_count = userdata["sub_admins_buttons"].get(str(user_id), 0)
+        userdata["sub_admins_buttons"][str(user_id)] = current_count + 1
+        save_userdata(userdata)
 
         await update.message.reply_text(
             "✅ دکمه با تمام زیرمجموعه‌ها کپی شد.",
@@ -3163,16 +3263,23 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "contents": []
     }
 
-    push_admin_history(context, db)  # 👈 اینجا
+    push_admin_history(context, db)
     db[current_node_id]["children"].append(new_id)
-    save_db(db)
 
-    #await update.message.reply_text(
-    #    f"دکمه '{text}' ساخته شد.",
-    #    reply_markup=get_keyboard(current_node_id, True)
-    #)
+    # --- سیستم لاگ‌گیری برای دکمه جدید معمولی ---
+    parent_name = db[current_node_id]["name"]
+    parent_link = get_link(current_node_id, parent_name, bot_username)
+    child_name = text
+    child_link = get_link(new_id, child_name, bot_username)
+    
+    desc = f"➕ پوشه جدید {child_link} به {parent_link} اضافه شد."
+    caption = format_admin_log(update.effective_user, desc)
+    set_pending_caption(context, caption)
 
-    # تعداد دکمه اضافه شده هر ادمین
+    # ذخیره دیتابیس با اعمال کپشن
+    save_db(db, context=context)
+
+    # افزایش آمار دکمه‌های ادمین
     userdata = load_userdata()
     if "sub_admins_buttons" not in userdata:
         userdata["sub_admins_buttons"] = {}
@@ -3210,6 +3317,14 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db[current_node_id]["contents"] = []
             
             db[current_node_id]["contents"].extend(temp_content)
+            
+            bot_username = context.bot.username
+            node_name = db[current_node_id]["name"]
+            node_link = get_link(current_node_id, node_name, bot_username)
+            desc = f"📄 {len(temp_content)} فایل جدید به پوشه {node_link} اضافه شد."
+            caption = format_admin_log(update.effective_user, desc)
+            set_pending_caption(context, caption)
+            
             save_db(db)
             await update.message.reply_text(f"{len(temp_content)} مورد ذخیره شد.", reply_markup=get_keyboard(current_node_id, True))
         else:
@@ -3245,7 +3360,6 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_CONTENT
 
 async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     # لغو
     if update.message.text == "❌ لغو":
         current = context.user_data.get('current_node', 'root')
@@ -3265,6 +3379,11 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     byte_array = await file.download_as_bytearray()
 
     try:
+        # ۱. آماده‌سازی کپشن لاگ‌گیری در ابتدا
+        desc = "📥 بکاپ جدید (ریستور دیتابیس) وارد شد."
+        caption = format_admin_log(update.effective_user, desc)
+        set_pending_caption(context, caption) # ذخیره در کانتکست جهت همگام‌سازی
+
         # ============================
         # CASE 1: فایل JSON مستقیم
         # ============================
@@ -3272,8 +3391,10 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(DB_FILE, "wb") as f:
                 f.write(byte_array)
 
-            upload_db_to_telegram()
+            # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
+            upload_db_to_telegram(caption=caption)
 
+            # پاکسازی تاریخچه و ریستارت نود به root
             context.user_data.pop("admin_history", None)
             context.user_data.pop("admin_future", None)
             context.user_data["current_node"] = "root"
@@ -3288,7 +3409,6 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # CASE 2: فایل ZIP شامل database.json
         # ============================
         if filename.endswith(".zip"):
-
             with zipfile.ZipFile(iolib.BytesIO(byte_array)) as zf:
                 db_name = None
                 for name in zf.namelist():
@@ -3303,12 +3423,14 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 with open(DB_FILE, "wb") as f:
                     f.write(zf.read(db_name))
 
-            upload_db_to_telegram()
+            # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
+            upload_db_to_telegram(caption=caption)
 
+            # پاکسازی تاریخچه و ریستارت نود به root
             context.user_data.pop("admin_history", None)
             context.user_data.pop("admin_future", None)
             context.user_data["current_node"] = "root"
-
+            
             await update.message.reply_text(
                 "✅ بکاپ ZIP با موفقیت وارد شد.",
                 reply_markup=get_keyboard("root", True)
@@ -3322,6 +3444,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ خطا در بازگردانی:\n{e}")
         return WAITING_RESTORE_FILE
+
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
