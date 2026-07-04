@@ -1204,7 +1204,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.13)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.14)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2689,11 +2689,11 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_disabled = users.get(user_id, {}).get("smart_search_disabled", False)
     
     if is_disabled:
-        # اگر سرچ خاموش باشد، پاسخی ارسال نمی‌شود یا می‌توانید یک پیام ساده دهید:
-        await update.message.reply_text(
-            "⚠️ سرچ هوشمند برای شما غیرفعال است.\n"
-            "برای فعال کردن مجدد آن از دستور /on_of_search استفاده کنید."
-        )
+        ## اگر سرچ خاموش باشد، پاسخی ارسال نمی‌شود یا می‌توانید یک پیام ساده دهید:
+        #await update.message.reply_text(
+        #    "⚠️ سرچ هوشمند برای شما غیرفعال است.\n"
+        #    "برای فعال کردن مجدد آن از دستور /on_of_search استفاده کنید."
+        #)
         return CHOOSING
 
     # ✅ اگر دکمه نبود و سرچ هوشمند روشن بود، سرچ کن
