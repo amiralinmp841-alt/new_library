@@ -42,6 +42,7 @@ import requests
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from smart_search import smart_search
+from html import escape
 
 
 def delete_node_recursive(db, node_id):
@@ -791,7 +792,6 @@ def get_admin_password_inline_keyboard():
         ]
     ])
 
-
 def get_node_path_text(db, node_id, separator=" ⬅️ "):
     """
     مسیر کامل یک نود را از ریشه تا خودش می‌سازد.
@@ -826,6 +826,41 @@ def get_node_path_text(db, node_id, separator=" ⬅️ "):
 
     if not path:
         return db.get("root", {}).get("name", "خانه")
+
+    return separator.join(path)
+
+def get_node_path_html(db, node_id, bot_username, separator=" ⬅️ "):
+    """
+    مسیر کامل یک نود را از ریشه تا خودش به‌صورت لینک‌دار HTML می‌سازد.
+    اسم پوشه‌ها آبی و کلیک‌دار می‌شوند.
+    """
+
+    if node_id not in db:
+        return "مسیر نامشخص"
+
+    path = []
+    current_id = node_id
+    visited = set()
+
+    while current_id and current_id in db:
+        if current_id in visited:
+            break
+
+        visited.add(current_id)
+        node = db[current_id]
+
+        if current_id != "root":
+            name = escape(node.get("name", "بدون نام"))
+            link = f"https://t.me/{bot_username}?start={current_id}"
+            path.append(f'<a href="{link}">{name}</a>')
+
+        current_id = node.get("parent")
+
+    path.reverse()
+
+    if not path:
+        root_name = escape(db.get("root", {}).get("name", "خانه"))
+        return f'<a href="https://t.me/{bot_username}?start=root">{root_name}</a>'
 
     return separator.join(path)
 
@@ -1253,12 +1288,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_admin and not has_children:
                 parent_id = target_node.get("parent") or "root"
                 context.user_data["current_node"] = parent_id
-
-                path_text = get_node_path_text(db, target_id)
+                bot_username = context.bot.username
+                path_text = get_node_path_html(db, target_id, bot_username)
 
                 await update.message.reply_text(
                     f"📂 مسیر:\n{path_text}",
-                    reply_markup=get_keyboard(parent_id, is_admin)
+                    reply_markup=get_keyboard(parent_id, is_admin),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
                 )
 
                 await send_node_contents(update, context, target_id)
@@ -1266,12 +1303,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # 👑 ادمین، یا نودی که فرزند دارد => خود پوشه باز شود
             context.user_data["current_node"] = target_id
-
-            path_text = get_node_path_text(db, target_id)
+            bot_username = context.bot.username
+            path_text = get_node_path_html(db, target_id, bot_username)
 
             await update.message.reply_text(
                 f"📂 مسیر:\n{path_text}",
-                reply_markup=get_keyboard(target_id, is_admin)
+                reply_markup=get_keyboard(target_id, is_admin),
+                parse_mode="HTML",
+                disable_web_page_preview=True
             )
 
             await send_node_contents(update, context, target_id)
@@ -1282,7 +1321,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.6.2)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.6.3)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
