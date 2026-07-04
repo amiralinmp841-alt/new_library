@@ -1154,7 +1154,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.5)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.6)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2541,26 +2541,9 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ✅ این صفحه برای report ذخیره شود
             set_report_page(context, child_id)
 
-            # --- شروع تغییرات سیستم مسیر ---
             bot_username = context.bot.username
             path_str = get_breadcrumb_path(child_id, db, bot_username)
             
-            # اگر پوشه فرزند داشته باشد (پوشه است)
-            if child_node.get("children"):
-                context.user_data['current_node'] = child_id
-                
-                await update.message.reply_text(
-                    f"📂 {child_node['name']}\n"
-                    f"🗺 مسیر: {path_str}",
-                    reply_markup=get_keyboard(child_id, is_admin),
-                    parse_mode="HTML",
-                    disable_web_page_preview=True
-                )
-            else:
-                # اگر صرفا محتوا دارد (پوشه نیست)، هدر مسیر را نشان نده
-                await send_node_contents(update, context, child_id)
-            # --- پایان تغییرات سیستم مسیر ---
-
             # 👤 کاربر عادی + دکمه بدون فرزند
             if not is_admin and not child_node.get("children"):
                 # فقط محتوا را نمایش بده، بدون تغییر صفحه
@@ -2571,10 +2554,12 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['current_node'] = child_id
     
             await update.message.reply_text(
-                f"📂 {child_node['name']}",
-                reply_markup=get_keyboard(child_id, is_admin)
+                f"📂 {child_node['name']}\n"
+                f"🗺 مسیر: {path_str}",
+                reply_markup=get_keyboard(child_id, is_admin),
+                parse_mode="HTML",
+                disable_web_page_preview=True
             )
-    
             await send_node_contents(update, context, child_id)
             return CHOOSING
 
