@@ -1162,13 +1162,18 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
     help_text = (
-        """🔍 نتیجه‌ای در این پوشه یافت نشد.
-⚠️ توجه! فقط مسیرهای موجود در این پوشه‌ای که قرار دارید، سرچ می‌شود. برای سرچ کلی‌تر، در صفحه اصلی سرچ را انجام دهید!""" + help_text,
-        )
+        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_of_search استفاده کنید."
+    )
 
     if not results:
         await update.message.reply_text(
-            "🔍 نتیجه‌ای در این پوشه یافت نشد." + help_text,
+            f"""🔍 نتیجه‌ای در این پوشه یافت نشد.
+        
+        ⚠️ توجه!
+        فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
+        برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
+        
+        {help_text}""",
             parse_mode="HTML"
         )
         return CHOOSING
@@ -1188,7 +1193,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
-    msg += "روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید."
+    msg += "\nروی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید.\n\n"
     msg += help_text
 
     await update.message.reply_text(
@@ -1321,7 +1326,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.6.3)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.6.4)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
