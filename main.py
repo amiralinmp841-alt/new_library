@@ -3847,6 +3847,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_CONTENT
 
 
+
 async def handle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     edited = update.edited_message
     if not edited:
