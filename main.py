@@ -596,6 +596,20 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/none": None
     }
 
+    color_names = {
+        "primary": "آبی",
+        "success": "سبز",
+        "danger": "قرمز",
+        None: "بدون رنگ"
+    }
+
+    command_color_names = {
+        "/green": "سبز",
+        "/blue": "آبی",
+        "/red": "قرمز",
+        "/none": "بدون رنگ"
+    }
+
     if command not in styles:
         await update.message.reply_text("❌ دستور رنگ نامعتبر است.")
         return
@@ -614,41 +628,40 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     push_admin_history(context, db)
 
+    old_style = db[current_node_id].get("style")
+    old_color_name = color_names.get(old_style, "بدون رنگ")
+
     new_style = styles[command]
+    new_color_name = command_color_names[command]
 
     if new_style is None:
         db[current_node_id].pop("style", None)
     else:
         db[current_node_id]["style"] = new_style
 
-    old_color = db[current_node_id].get("style", "بدون رنگ")
-    new_color_name = color_names[command]
     bot_username = context.bot.username
     node_name = db[current_node_id]["name"]
     node_link = get_link(current_node_id, node_name, bot_username)
+
     desc = (
         f"🎨 رنگ پوشه {node_link} "
-        f"از «{old_color}» به «{new_color_name}» تغییر کرد."
+        f"از «{old_color_name}» به «{new_color_name}» تغییر کرد."
     )
+
     caption = format_admin_log(update.effective_user, desc)
     set_pending_caption(context, caption)
 
-    save_db(db)
+    save_db(db, context=context)
 
     parent_id = db[current_node_id].get("parent", "root")
     context.user_data["current_node"] = parent_id
 
-    color_names = {
-        "/green": "سبز",
-        "/blue": "آبی",
-        "/red": "قرمز",
-        "/none": "بدون رنگ"
-    }
-    
     await update.message.reply_text(
-        f"✅ رنگ این پوشه به «{color_names[command]}» تغییر یافت.",
+        f"✅ رنگ این پوشه به «{new_color_name}» تغییر یافت.",
         reply_markup=get_keyboard(parent_id, True)
     )
+
+    return CHOOSING
 
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
@@ -1245,7 +1258,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.17)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.18)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2459,7 +2472,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption = format_admin_log(update.effective_user, desc)
                 set_pending_caption(context, caption)
                 
-                save_db(db)
+                save_db(db, context=context)
                 await update.message.reply_text(
                     f"دکمه '{target_name}' و تمام زیرمجموعه‌هایش حذف شد.",
                     reply_markup=get_keyboard(current_node_id, is_admin)
@@ -2525,7 +2538,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption = format_admin_log(update.effective_user, desc)
             set_pending_caption(context, caption)
             
-            save_db(db)
+            save_db(db, context=context)
             await update.message.reply_text(
                 "🧹 محتوای این صفحه حذف شد.",
                 reply_markup=get_keyboard(current_node_id, True)
@@ -2627,7 +2640,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption = format_admin_log(update.effective_user, desc)
                 set_pending_caption(context, caption)
                 
-                save_db(db)
+                save_db(db, context=context)
         
                 for key in ["reorder_remaining", "reorder_result", "reorder_mode"]:
                     context.user_data.pop(key, None)
@@ -2787,7 +2800,7 @@ async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption = format_admin_log(update.effective_user, desc)
         set_pending_caption(context, caption)
 
-        save_db(db)
+        save_db(db, context=context)
 
     current = context.user_data.get("current_node", "root")
     await update.message.reply_text("✅ نام دکمه ویرایش شد.", reply_markup=get_keyboard(current, True))
@@ -3323,7 +3336,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption = format_admin_log(update.effective_user, desc)
             set_pending_caption(context, caption)
             
-            save_db(db)
+            save_db(db, context=context)
             await update.message.reply_text(f"{len(temp_content)} مورد ذخیره شد.", reply_markup=get_keyboard(current_node_id, True))
         else:
             current = context.user_data.get('current_node', 'root')
