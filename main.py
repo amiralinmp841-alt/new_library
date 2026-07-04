@@ -1228,14 +1228,6 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
     if node_id in db and "contents" in db[node_id] and len(db[node_id]["contents"]) > idx:
         push_admin_history(context, db)
         
-        # ارسال لوگ ادمین
-        bot_username = context.bot.username
-        node_name = db[node_id]["name"]
-        node_link = get_link(node_id, node_name, bot_username)
-        desc = f"🗑 یک فایل از پوشه {node_link} حذف شد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption)
-
         # حذف آیتم از لیست
         removed_item = db[node_id]["contents"].pop(idx)
         save_db(db, context=context)
@@ -1245,6 +1237,14 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
             k: v for k, v in context.user_data.get("sent_mapping", {}).items() 
             if v["node_id"] != node_id
         }
+
+        # ارسال لوگ ادمین
+        bot_username = context.bot.username
+        node_name = db[node_id]["name"]
+        node_link = get_link(node_id, node_name, bot_username)
+        desc = f"🗑 یک فایل از پوشه {node_link} حذف شد."
+        caption = format_admin_log(update.effective_user, desc)
+        set_pending_caption(context, caption)
 
         await msg.reply_text("✅ فایل با موفقیت از دیتابیس این پوشه حذف شد.")
     else:
@@ -1276,22 +1276,23 @@ async def handle_reply_change(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text("⚠️ شما فقط می‌توانید فایل‌های مربوط به پوشه فعلی خود را تغییر دهید.")
         return
 
-    context.user_data.pop("temp_content", None)
+    # ذخیره اطلاعات برای جایگزینی بعدی
     context.user_data["change_target"] = {
         "node_id": mapping["node_id"],
-        "content_index": mapping["content_index"],
-        "source_message_id": target_msg_id,
+        "content_index": mapping["content_index"]
     }
-    context.user_data["temp_content"] = []
+    
+    # ورود به حالت بافر موقت
+    context.user_data['temp_content'] = []
 
     await msg.reply_text(
         "🔄 فایل یا فایل‌های جدیدی که می‌خواهید جایگزین این فایل شوند را ارسال کنید.\n"
-        "پس از اتمام کار، دکمه «✅ ثبت نهایی» را بزنید تا جایگزین شود.",
+        "پس از اتمام کار، دکمه '✅ ثبت نهایی' را بزنید تا جایگزین شود.",
         reply_markup=ReplyKeyboardMarkup([["✅ ثبت نهایی", "❌ لغو"]], resize_keyboard=True)
     )
-
+    
+    # تغییر وضعیت Conversation به انتظار دریافت محتوا
     return WAITING_CONTENT
-
 
 def get_subtree_db(db, root_node_id):
     subtree = {}
@@ -1369,7 +1370,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
-    msg += "\nروی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید.\n\n"
+    msg += " مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید."
     msg += help_text
 
     await update.message.reply_text(
@@ -1590,7 +1591,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         """🕊 به ربات کتابخانه دانشگاه خوش آمدید.
     
-    📌 نسخه: V_4.6.5
+    📌 نسخه: V_4.6.7
     
     🔍 جستجوی فایل‌ها
     برای پیدا کردن فایل موردنظر، کافی است نام یا توضیح آن را به‌صورت متنی ارسال کنید؛ برای مثال:
@@ -3724,14 +3725,11 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "❌ لغو":
         current = context.user_data.get("current_node", "root")
         context.user_data.pop("temp_content", None)
-        context.user_data.pop("change_target", None)
+        context.user_data.pop("change_target", None) # پاکسازی حالت جایگزینی
         await msg.reply_text("عملیات لغو شد.", reply_markup=get_keyboard(current, True))
         return CHOOSING
 
     if text == "✅ ثبت نهایی":
-        current_node_id = context.user_data.get("current_node", "root")
-        change_target = context.user_data.get("change_target")
-
         if not temp_content:
             current = context.user_data.get("current_node", "root")
             context.user_data.pop("temp_content", None)
@@ -3739,84 +3737,56 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text("چیزی برای ذخیره وجود نداشت.", reply_markup=get_keyboard(current, True))
             return CHOOSING
 
+        current_node_id = context.user_data.get("current_node", "root")
         db = load_db()
-        final_contents = [
-            {k: v for k, v in item.items() if k != "message_id"}
-            for item in temp_content
-        ]
+        push_admin_history(context, db)
 
-        # حالت جایگزینی
-        if change_target:
-            target_node_id = change_target["node_id"]
-            target_index = change_target["content_index"]
-
-            if target_node_id not in db:
-                context.user_data.pop("temp_content", None)
-                context.user_data.pop("change_target", None)
-                await msg.reply_text(
-                    "⚠️ پوشه مقصد برای جایگزینی پیدا نشد.",
-                    reply_markup=get_keyboard(current_node_id, True),
-                )
-                return CHOOSING
-
-            contents = db[target_node_id].setdefault("contents", [])
-
-            if not (0 <= target_index < len(contents)):
-                context.user_data.pop("temp_content", None)
-                context.user_data.pop("change_target", None)
-                await msg.reply_text(
-                    "⚠️ فایل اصلی برای جایگزینی دیگر در آن موقعیت وجود ندارد.",
-                    reply_markup=get_keyboard(current_node_id, True),
-                )
-                return CHOOSING
-
-            push_admin_history(context, db)
-
-            removed_item = contents.pop(target_index)
-            for offset, item in enumerate(final_contents):
-                contents.insert(target_index + offset, item)
-
-            bot_username = context.bot.username
-            node_name = db[target_node_id]["name"]
-            node_link = get_link(target_node_id, node_name, bot_username)
-            desc = f"🔄 یک فایل در پوشه {node_link} با {len(final_contents)} مورد جدید جایگزین شد."
-            caption = format_admin_log(update.effective_user, desc)
-            set_pending_caption(context, caption)
-
-            save_db(db, context=context)
-
-            context.user_data.pop("temp_content", None)
-            context.user_data.pop("change_target", None)
-            context.user_data.pop("sent_mapping", None)
-
-            await msg.reply_text(
-                f"✅ فایل قبلی حذف شد و {len(final_contents)} فایل جدید جایگزین شد.",
-                reply_markup=get_keyboard(current_node_id, True),
-            )
-            return CHOOSING
-
-        # حالت افزودن عادی
         if "contents" not in db[current_node_id]:
             db[current_node_id]["contents"] = []
 
-        push_admin_history(context, db)
-        db[current_node_id]["contents"].extend(final_contents)
+        final_contents = []
+        for item in temp_content:
+            saved_item = {k: v for k, v in item.items() if k != "message_id"}
+            final_contents.append(saved_item)
+
+        # 🔄 بررسی اینکه آیا در حالت جایگزینی (Change) هستیم یا خیر
+        change_target = context.user_data.get("change_target")
+        if change_target:
+            target_node = change_target["node_id"]
+            idx = change_target["content_index"]
+            
+            if target_node == current_node_id and len(db[target_node]["contents"]) > idx:
+                # حذف فایل قدیمی و درج فایل‌های جدید به جای آن
+                db[target_node]["contents"].pop(idx)
+                for item in reversed(final_contents):
+                    db[target_node]["contents"].insert(idx, item)
+                
+                msg_text = f"🔄 فایل قدیمی حذف و {len(final_contents)} فایل جدید جایگزین شد."
+            else:
+                db[current_node_id]["contents"].extend(final_contents)
+                msg_text = f"⚠️ خطا در تطابق مسیر! فایل‌ها به عنوان محتوای جدید به انتهای پوشه اضافه شدند."
+            
+            context.user_data.pop("change_target", None)
+        else:
+            # رفتار عادی افزودن محتوا
+            db[current_node_id]["contents"].extend(final_contents)
+            msg_text = f"{len(final_contents)} مورد ذخیره شد."
+
+        # ریست کردن حافظه موقت نگاشت به دلیل جابجا شدن ایندکس‌ها
+        context.user_data.pop("sent_mapping", None)
 
         bot_username = context.bot.username
         node_name = db[current_node_id]["name"]
         node_link = get_link(current_node_id, node_name, bot_username)
-        desc = f"📝 {len(final_contents)} محتوا به پوشه {node_link} افزوده شد."
+        desc = f"📝 تغییرات محتوا در پوشه {node_link} اعمال شد."
         caption = format_admin_log(update.effective_user, desc)
         set_pending_caption(context, caption)
 
         save_db(db, context=context)
-
         context.user_data.pop("temp_content", None)
-        context.user_data.pop("change_target", None)
-        context.user_data.pop("sent_mapping", None)
 
         await msg.reply_text(
-            f"{len(final_contents)} مورد ذخیره شد.",
+            msg_text,
             reply_markup=get_keyboard(current_node_id, True),
         )
         return CHOOSING
@@ -3845,7 +3815,6 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return WAITING_CONTENT
 
-
 async def handle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     edited = update.edited_message
     if not edited:
@@ -3873,6 +3842,9 @@ async def handle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         break
+
+
+
 
 
 async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3975,9 +3947,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     return CHOOSING
-
-
-# ======== BUILD APPLICATION ========  ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ========
 def build_application():
     application = ApplicationBuilder().token(TOKEN).build()
 
@@ -4097,7 +4066,6 @@ def build_application():
     application.add_handler(conv_handler, group=1)
 
     return application
-
 
 # ================= HEALTH & WEBHOOK =================
 async def health(request):
