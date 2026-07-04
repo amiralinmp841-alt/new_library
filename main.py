@@ -1196,7 +1196,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.11)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.12)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2173,21 +2173,35 @@ async def show_admin_mgmt_panel(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["admin_panel"] = "admin_mgmt"
     return CHOOSING
 
-def find_valid_node(old_db, new_db, node_id):
-    """ اگر node حذف شده باشد، نزدیک‌ترین والد موجود را برمی‌گرداند. """
-    current = node_id
+def find_nearest_valid_node(db, target_node_id):
+    """
+    بررسی می‌کند آیا نود در دیتابیس جدید وجود دارد یا خیر.
+    اگر وجود نداشت، به والد آن نود مراجعه می‌کند تا اولین والد معتبری که در دیتابیس جدید وجود دارد را پیدا کند.
+    اگر هیچ‌کدام پیدا نشد، 'root' را برمی‌گرداند.
+    """
+    # اگر نود در دیتابیس جدید موجود است
+    if target_node_id in db:
+        return target_node_id
+
+    # پیدا کردن والد نود در کل دیتابیس (پیمایش معکوس)
+    current = target_node_id
     while True:
-        # اگر خود نود هنوز وجود دارد
-        if current in new_db:
-            return current
-        # اگر در دیتابیس قبلی هم نبود
-        if current not in old_db:
-            return "root"
-        parent = old_db[current].get("parent")
-        # رسیدیم به ریشه
-        if parent is None:
-            return "root"
-        current = parent
+        parent_id = None
+        # پیدا کردن والدی که این نود فرزند آن بوده است
+        for node_id, node_data in db.items():
+            if current in node_data.get("children", []):
+                parent_id = node_id
+                break
+        
+        if parent_id and parent_id in db:
+            return parent_id  # والد معتبر پیدا شد
+        elif parent_id:
+            current = parent_id  # والد را به عنوان نود بعدی برای جستجو قرار بده
+        else:
+            break  # والدی پیدا نشد
+            
+    return "root"
+
 
 
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2559,26 +2573,35 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⛔️ چیزی برای بازگشت وجود ندارد.")
                 return CHOOSING
         
-            old_db = load_db()
-            # وضعیت فعلی میره تو future
+            # ذخیره وضعیت فعلی دیتابیس در future
             future.append(copy.deepcopy(load_db()))
-            # آخرین snapshot
+        
+            # لود کردن دیتابیس قبلی
             last_db = history.pop()
             save_db(last_db)
-        
-            # 🔒 برای جلوگیری از کرش
+            
+            # پیدا کردن مناسب‌ترین نود پس از بازگرداندن بکاپ
             current_node = context.user_data.get("current_node", "root")
-            target_node = find_valid_node(old_db, last_db, current_node)
-            context.user_data["current_node"] = target_node
+            valid_node = find_nearest_valid_node(last_db, current_node)
+            
+            # ذخیره نود معتبر جدید در سشن کاربر
+            context.user_data["current_node"] = valid_node
         
+            # دریافت نام پوشه و مسیر آن
+            bot_username = context.bot.username
+            path_str = get_breadcrumb_path(valid_node, last_db, bot_username)
+            node_name = last_db.get(valid_node, {}).get("name", "خانه")
+
             await update.message.reply_text(
-                "↩️ آخرین تغییر بازگردانده شد.",
-                reply_markup=get_keyboard("target_node", True)
+                f"↩️ آخرین تغییر بازگردانده شد.\n"
+                f"📂 پوشه فعلی: {node_name}\n"
+                f"🗺 مسیر: {path_str}",
+                reply_markup=get_keyboard(valid_node, True),
+                parse_mode="HTML",
+                disable_web_page_preview=True
             )
             return CHOOSING
         
-        
-
         if text == "↪️" and is_admin:
             history = context.user_data.get("admin_history", [])
             future = context.user_data.get("admin_future", [])
@@ -2586,21 +2609,33 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not future:
                 await update.message.reply_text("⛔️ چیزی برای جلو رفتن نیست.")
                 return CHOOSING
-
-            old_db = load_db()
-            # وضعیت فعلی بره history
+        
+            # ذخیره وضعیت فعلی دیتابیس در history
             history.append(copy.deepcopy(load_db()))
+        
+            # لود کردن دیتابیس بعدی
             next_db = future.pop()
             save_db(next_db)
         
-            # 🔒 برای جلوگیری از کرش
+            # پیدا کردن مناسب‌ترین نود پس از بازگرداندن بکاپ
             current_node = context.user_data.get("current_node", "root")
-            target_node = find_valid_node(old_db, next_db, current_node)
-            context.user_data["current_node"] = target_node
+            valid_node = find_nearest_valid_node(next_db, current_node)
+            
+            # ذخیره نود معتبر جدید در سشن کاربر
+            context.user_data["current_node"] = valid_node
+        
+            # دریافت نام پوشه و مسیر آن
+            bot_username = context.bot.username
+            path_str = get_breadcrumb_path(valid_node, next_db, bot_username)
+            node_name = next_db.get(valid_node, {}).get("name", "خانه")
 
             await update.message.reply_text(
-                "↪️ تغییر دوباره اعمال شد.",
-                reply_markup=get_keyboard("target_node", True)
+                f"↪️ تغییر دوباره اعمال شد.\n"
+                f"📂 پوشه فعلی: {node_name}\n"
+                f"🗺 مسیر: {path_str}",
+                reply_markup=get_keyboard(valid_node, True),
+                parse_mode="HTML",
+                disable_web_page_preview=True
             )
             return CHOOSING
         
@@ -3327,7 +3362,6 @@ def build_application():
                 CommandHandler("report", report_page),
                 CommandHandler("deeplink", deeplink_command),
                 CommandHandler("chat", start_chat_with_admin),
-                CommandHandler("on_of_search", toggle_smart_search),
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation)
