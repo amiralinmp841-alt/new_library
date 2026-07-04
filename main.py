@@ -188,7 +188,7 @@ def run_telethon(coro):
 
 # ============ TELEGRAM FILE BACKUP HELPERS ============
 
-async def _upload_file_to_telegram(chat_id, file_path, caption=None):
+async def _upload_file_to_telegram(chat_id, file_path, caption=None, parse_mode=None):
     try:
         if not os.path.exists(file_path):
             print(f"❌ File not found for upload: {file_path}")
@@ -197,7 +197,8 @@ async def _upload_file_to_telegram(chat_id, file_path, caption=None):
         await telethon_client.send_file(
             entity=chat_id,
             file=file_path,
-            caption=caption or f"backup: {os.path.basename(file_path)}"
+            caption=caption or f"backup: {os.path.basename(file_path)}",
+            parse_mode=parse_mode  # ← ← ← پشتیبانی از HTML / Markdown
         )
 
         print(f"⬆️ Uploaded to Telegram group: {file_path}")
@@ -232,9 +233,9 @@ async def _download_latest_file_from_telegram(chat_id, filename, save_path):
         return False
 
 
-def upload_file_to_telegram(chat_id, file_path, caption=None):
+def upload_file_to_telegram(chat_id, file_path, caption=None, parse_mode=None):
     return run_telethon(
-        _upload_file_to_telegram(chat_id, file_path, caption)
+        _upload_file_to_telegram(chat_id, file_path, caption, parse_mode)
     )
 
 
@@ -1247,7 +1248,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.16)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.17)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
