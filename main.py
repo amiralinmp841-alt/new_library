@@ -1154,7 +1154,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.6)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.7)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2204,24 +2204,29 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("به صفحه اصلی بازگشتید.", reply_markup=get_keyboard('root', is_admin))
         return CHOOSING
     
-    if text == "🔙 بازگشت":
-        parent = db[current_node_id].get('parent')
-        
+    if text.startswith("🔙 بازگشت"):
+        parent = db[current_node_id].get("parent")
+    
         # تعیین نود مقصد
-        target_node = parent if parent else 'root'
-        context.user_data['current_node'] = target_node
+        target_node = parent if parent else "root"
+        context.user_data["current_node"] = target_node
         set_report_page(context, target_node)
-        
-        bot_username = context.bot.username
-        path_str = get_breadcrumb_path(target_node, db, bot_username)
-        
-        # متن مناسب برای بازگشت
-        folder_name = db[target_node]['name'] if target_node != 'root' else "صفحه اصلی"
-        header_text = f"📂 بازگشت به {folder_name}" if target_node != 'root' else "🏠 صفحه اصلی"
-
+    
+        if target_node == "root":
+            return_message = "🏠 خانه"
+        else:
+            bot_username = context.bot.username
+            path_str = get_breadcrumb_path(target_node, db, bot_username)
+    
+            folder_name = db[target_node]["name"]
+    
+            return_message = (
+                f"📂 بازگشت به {folder_name}\n"
+                f"🗺 مسیر: {path_str}"
+            )
+    
         await update.message.reply_text(
-            f"{header_text}\n"
-            f"🗺 مسیر: {path_str}",
+            return_message,
             reply_markup=get_keyboard(target_node, is_admin),
             parse_mode="HTML",
             disable_web_page_preview=True
