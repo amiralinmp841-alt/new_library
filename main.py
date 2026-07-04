@@ -1050,7 +1050,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
     help_text = (
-        "\n\nبرای خاموش یا روشن کردن سرچ هوشمند، از دستور /on_of_search استفاده کنید.\n"
+        "\n\n⚙️ برای خاموش یا روشن کردن سرچ هوشمند، از دستور /on_of_search استفاده کنید.\n"
     )
 
     if not results:
