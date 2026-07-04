@@ -116,8 +116,9 @@ logging.basicConfig(
     WAITING_BROADCAST_CONTENT,
     WAITING_SINGLE_USER_CONTENT,
     WAITING_PICK_USER_FOR_MSG,
-    WAITING_CHAT_MESSAGE 
-) = range(15)
+    WAITING_CHAT_MESSAGE, 
+    WAITING_REPORT_TEXT
+) = range(16)
 
 # ============ TELEGRAM USER API BACKUP CONFIG ============
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -709,7 +710,7 @@ def get_keyboard(node_id, is_admin):
         # فعلاً به همون شکلی که داشتی گذاشتم که بهم نریزه
         keyboard.append(["➕ افزودن دکمه", "➕ افزودن محتوا"])
         keyboard.append(["🗑 حذف دکمه", "🧹 حذف محتوای صفحه"])
-        keyboard.append(["✏️ ویرایش نام دکمه", "🔑 دریافت هش و لینک دکمه", "🔀 جابه‌جایی چیدمان"])
+        keyboard.append(["✏️ ویرایش‌نام‌دکمه", "🔑 دریافت ‌هش‌ولینک‌دکمه", "🔀 جابه‌جایی‌چیدمان"])
         keyboard.append(["📥 دریافت بکاپ", "📤 وارد کردن بکاپ"])
         keyboard.append(["↩️", "↪️"])
 
@@ -873,7 +874,8 @@ def set_report_page(context: ContextTypes.DEFAULT_TYPE, node_id: str):
     ذخیره صفحه فعلی برای قابلیت /report
     """
     context.user_data["current_report_node"] = node_id
-    
+
+
 async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=False)
 
@@ -905,14 +907,19 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_link = f'<a href="tg://user?id={user.id}">{full_name}</a>'
 
     try:
-        # حالت 1: ریپورت فایل/محتوا با ریپلای روی پیام ربات
+        # حالت 1: گزارش فایل/محتوا با ریپلای
         if update.message.reply_to_message:
             replied_msg_id = update.message.reply_to_message.message_id
             sent_mapping = context.user_data.get("sent_mapping", {})
             target = sent_mapping.get(replied_msg_id)
 
             if not target:
-                await update.message.reply_text("❌ این پیام از محتوای قابل‌شناسایی ربات نیست.")
+                await update.message.reply_text(
+                    "❌ امکان گزارش این فایل وجود ندارد.\n\n"
+                    "فقط فایل‌های مربوط به آخرین پوشه‌ای که باز کرده‌اید، قابل شناسایی و گزارش هستند. "
+                    "پس از باز کردن پوشه‌های دیگر، اطلاعات پوشه‌های قبلی از حافظه ربات حذف می‌شوند.\n\n"
+                    "برای گزارش یک فایل، ابتدا پوشه حاوی آن را باز کنید، سپس روی پیام همان فایل ریپلای کرده و دستور /report را ارسال کنید."
+                )
                 return CHOOSING
 
             node_id = target.get("node_id")
@@ -956,18 +963,14 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(caption_or_text) > 700:
                 caption_or_text = caption_or_text[:700] + "..."
 
-            if caption_or_text:
-                content_preview = html.escape(caption_or_text)
-            else:
-                content_preview = "ندارد"
-
+            content_preview = html.escape(caption_or_text) if caption_or_text else "ندارد"
             file_hash = html.escape(f"{node_id}__{content_index}")
 
             report_text = (
                 "🚨 <b>گزارش فایل / محتوا</b>\n\n"
                 f"👤 <b>کاربر گزارش‌دهنده:</b> {user_link}\n"
                 f"🆔 <b>آیدی عددی کاربر:</b> <code>{user.id}</code>\n"
-                f"🔗 <b>یوزرنیم:</b> <code>{username_text}</code>\n\n"
+                f"🔗 <b>یوزرنیم:</b> {username_text}\n\n"
                 f"📂 <b>نام پوشه:</b> {page_name}\n"
                 f"📍 <b>مسیر پوشه:</b>\n{path_text}\n\n"
                 f"🗂 <b>نوع محتوا:</b> {html.escape(content_type_text)}\n"
@@ -982,20 +985,23 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🗂 <b>نوع محتوا:</b> {html.escape(content_type_text)}\n"
                 f"📂 <b>نام پوشه:</b> {page_name}\n"
                 f"📍 <b>مسیر پوشه:</b>\n{path_text}\n\n"
-                f"🔗 <b>دیپ‌لینک فایل:</b>\n<code>{html.escape(deep_link)}</code>"
+                f"🔗 <b>دیپ‌لینک فایل:</b>\n<code>{html.escape(deep_link)}</code>\n\n"
+                f"📝 <b>متن گزارش:</b>\n{content_preview}"
             )
 
-            await context.bot.send_message(
-                chat_id=REPORT_GROUP_ID,
-                text=report_text,
-                parse_mode="HTML",
-                disable_web_page_preview=True
+            set_pending_report(context, {
+                "report_text": report_text,
+                "user_reply": user_reply,
+            })
+
+            await update.message.reply_text(
+                "📝 متن گزارش را ارسال کنید.\n"
+                "اگر نمی‌خواهید متنی اضافه شود، دستور /no_messager را بزنید.\n"
+                "برای لغو کامل گزارش، دستور /cansel را بزنید."
             )
+            return WAITING_REPORT_TEXT
 
-            await update.message.reply_text(user_reply, parse_mode="HTML")
-            return CHOOSING
-
-        # حالت 2: ریپورت صفحه/پوشه مثل قبل
+        # حالت 2: گزارش صفحه/پوشه
         node_id = context.user_data.get("current_report_node")
         if not node_id:
             node_id = context.user_data.get("current_node", "root")
@@ -1014,7 +1020,7 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🚨 <b>گزارش صفحه</b>\n\n"
             f"👤 <b>کاربر گزارش‌دهنده:</b> {user_link}\n"
             f"🆔 <b>آیدی عددی کاربر:</b> <code>{user.id}</code>\n"
-            f"🔗 <b>یوزرنیم:</b> <code>{username_text}</code>\n\n"
+            f"🔗 <b>یوزرنیم:</b> {username_text}\n\n"
             f"📄 <b>نام صفحه:</b> {page_name}\n"
             f"📂 <b>مسیر صفحه:</b>\n{path_text}\n\n"
             f"🔑 <b>هش صفحه:</b>\n<code>{html.escape(node_id)}</code>\n\n"
@@ -1025,22 +1031,72 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ گزارش شما با موفقیت برای مدیریت ارسال شد.\n\n"
             f"📄 <b>نام صفحه:</b> {page_name}\n"
             f"📂 <b>مسیر صفحه:</b>\n{path_text}\n\n"
-            f"🔗 <b>دیپ‌لینک صفحه:</b>\n<code>{html.escape(deep_link)}</code>"
+            f"🔗 <b>دیپ‌لینک صفحه:</b>\n<code>{html.escape(deep_link)}</code>\n\n"
+            f"📝 <b>متن گزارش:</b>\n{content_preview}"
         )
 
-        await context.bot.send_message(
-            chat_id=REPORT_GROUP_ID,
-            text=report_text,
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
+        set_pending_report(context, {
+            "report_text": report_text,
+            "user_reply": user_reply,
+        })
 
-        await update.message.reply_text(user_reply, parse_mode="HTML")
+        await update.message.reply_text(
+            "📝 متن گزارش را ارسال کنید.\n"
+            "اگر نمی‌خواهید متنی اضافه شود، دستور /no_messager را بزنید.\n"
+            "برای لغو کامل گزارش، دستور /cansel را بزنید."
+        )
+        return WAITING_REPORT_TEXT
 
     except Exception as e:
-        print("Failed to send report:", e)
-        await update.message.reply_text("❌ ارسال گزارش با خطا مواجه شد.")
+        print("Failed to prepare report:", e)
+        clear_pending_report(context)
+        await update.message.reply_text("❌ آماده‌سازی گزارش با خطا مواجه شد.")
+        return CHOOSING
 
+async def receive_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_user_activity(update, count_message=False)
+
+    user_id = update.effective_user.id
+    if is_user_banned(user_id):
+        clear_pending_report(context)
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از ربات را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return CHOOSING
+
+    if not get_pending_report(context):
+        await update.message.reply_text("❌ گزارشی در انتظار ارسال نیست.")
+        return CHOOSING
+
+    report_message_text = (update.message.text or "").strip()
+    return await send_pending_report(update, context, report_message_text)
+
+
+async def report_without_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_user_activity(update, count_message=False)
+
+    user_id = update.effective_user.id
+    if is_user_banned(user_id):
+        clear_pending_report(context)
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از ربات را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return CHOOSING
+
+    if not get_pending_report(context):
+        await update.message.reply_text("❌ گزارشی در انتظار ارسال نیست.")
+        return CHOOSING
+
+    return await send_pending_report(update, context, "")
+
+
+async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_user_activity(update, count_message=False)
+
+    clear_pending_report(context)
+    await update.message.reply_text("❌ ارسال گزارش لغو شد.")
     return CHOOSING
 
 
@@ -1459,7 +1515,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
-    msg += " مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید."
+    msg += " 🪄 روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید. /n"
     msg += help_text
 
     await update.message.reply_text(
@@ -1680,9 +1736,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         """🕊 به ربات کتابخانه دانشگاه خوش آمدید.
     
-    📌 نسخه: V4.6.12
-    
-    🔍 جستجوی فایل‌ها
+    <blockquote>
+    🔍 <b>جستجوی فایل‌ها</b>
     برای پیدا کردن فایل موردنظر، کافی است نام یا توضیح آن را به‌صورت متنی ارسال کنید؛ برای مثال:
     • وویس جلسه اول باکتری‌شناسی بهمن ۴۰۳
     • جزوه فیزیولوژی کلیه
@@ -1690,20 +1745,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     همچنین می‌توانید از دکمه‌های آماده ربات نیز استفاده کنید.
     
-    ⚙️ جستجوی هوشمند
-    برای فعال یا غیرفعال کردن جستجوی هوشمند، از دستور /on_of_search استفاده کنید.
+    ⚙️ <b>جستجوی هوشمند</b>
+    برای فعال یا غیرفعال کردن جستجوی هوشمند، از دستور <code>/on_of_search</code> استفاده کنید.
     
-    🤝 گزارش اشکالات
-    اگر در محتوای پوشه‌ها مشکلی مشاهده کردید، با استفاده از دستور /report می‌توانید آخرین پوشه‌ای را که باز کرده‌اید گزارش دهید و در بهبود و تکمیل محتوای ربات، همراه ما باشید.
+    🤝 <b>گزارش اشکالات</b>
+    • برای گزارش یک پوشه، دستور <code>/report</code> را در همان پوشه ارسال کنید.
+    • برای گزارش یک فایل، روی پیام همان فایل ریپلای کرده و سپس دستور <code>/report</code> را ارسال کنید.
     
-    🔗 دریافت دیپ‌لینک
-    • برای دریافت لینک یک پوشه، وارد همان پوشه شوید و دستور /deeplink را ارسال کنید.
-    • برای دریافت لینک یک فایل، روی پیام همان فایل ریپلای کرده و سپس دستور /deeplink را ارسال کنید.
+    🔗 <b>دریافت دیپ‌لینک</b>
+    • برای دریافت لینک یک پوشه، وارد همان پوشه شوید و دستور <code>/deeplink</code> را ارسال کنید.
+    • برای دریافت لینک یک فایل، روی پیام همان فایل ریپلای کرده و سپس دستور <code>/deeplink</code> را ارسال کنید.
     
-    👨‍💻 ارتباط با مدیر
-    پیشنهادها، انتقادات و گزارش‌های خود را از طریق دستور /chat با ما در میان بگذارید.""",
-        reply_markup=get_keyboard("root", is_admin)
+    👨‍💻 <b>ارتباط با مدیر</b>
+    پیشنهادها، انتقادات و گزارش‌های خود را از طریق دستور <code>/chat</code> با ما در میان بگذارید.
+    
+    📌 نسخه: V_4.6.16
+    </blockquote>""",
+        reply_markup=get_keyboard("root", is_admin),
+        parse_mode="HTML"
     )
+
     return CHOOSING
 
 async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2928,7 +2989,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("فایل ZIP بکاپ را ارسال کنید:", reply_markup=ReplyKeyboardMarkup([["❌ لغو"]], resize_keyboard=True))
             return WAITING_RESTORE_FILE
 
-        if text == "✏️ ویرایش نام دکمه":
+        if text == "✏️ ویرایش‌نام‌دکمه":
             children = db[current_node_id].get("children", [])
             if not children:
                 await update.message.reply_text("دکمه‌ای برای ویرایش وجود ندارد.")
@@ -2975,7 +3036,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return CHOOSING
 
-        if text == "🔑 دریافت هش و لینک دکمه":
+        if text == "🔑 دریافت ‌هش‌ولینک‌دکمه":
             children = db[current_node_id].get("children", [])
             if not children:
                 await update.message.reply_text("دکمه‌ای وجود ندارد.")
@@ -3018,7 +3079,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return CHOOSING
         
 
-        if text == "🔀 جابه‌جایی چیدمان":
+        if text == "🔀 جابه‌جایی‌چیدمان":
             children = db[current_node_id].get("children", [])
             if len(children) < 2:
                 await update.message.reply_text("برای جابه‌جایی حداقل دو دکمه لازم است.")
@@ -4094,6 +4155,12 @@ def build_application():
                 MessageHandler(filters.TEXT & (~filters.COMMAND), rename_button)
             ],
 
+            WAITING_REPORT_TEXT: [
+                CommandHandler("no_messager", report_without_message),
+                CommandHandler("cansel", cancel_report),
+                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_report_text),
+            ],
+            
             WAITING_ADMIN_PASSWORD_EDIT: [
                 MessageHandler(filters.TEXT & (~filters.COMMAND), set_admin_password)
             ],
@@ -4146,6 +4213,7 @@ def build_application():
             CommandHandler("start", start),
             CommandHandler("change", handle_reply_change),
             CommandHandler("del", handle_reply_delete),
+            CommandHandler("cansel", cancel_report),
         ],
         allow_reentry=True,
     )
