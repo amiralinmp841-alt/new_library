@@ -1154,7 +1154,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.7)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.8)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2123,6 +2123,22 @@ async def show_admin_mgmt_panel(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["admin_panel"] = "admin_mgmt"
     return CHOOSING
 
+def find_valid_node(old_db, new_db, node_id):
+    """ اگر node حذف شده باشد، نزدیک‌ترین والد موجود را برمی‌گرداند. """
+    current = node_id
+    while True:
+        # اگر خود نود هنوز وجود دارد
+        if current in new_db:
+            return current
+        # اگر در دیتابیس قبلی هم نبود
+        if current not in old_db:
+            return "root"
+        parent = old_db[current].get("parent")
+        # رسیدیم به ریشه
+        if parent is None:
+            return "root"
+        current = parent
+
 
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=True)
@@ -2498,11 +2514,12 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
             # آخرین snapshot
             last_db = history.pop()
-        
             save_db(last_db)
         
             # 🔒 برای جلوگیری از کرش
-            context.user_data["current_node"] = "root"
+            current_node = context.user_data.get("current_node", "root")
+            target_node = find_valid_node(old_db, last_db, current_node)
+            context.user_data["current_node"] = "target_node"
         
             await update.message.reply_text(
                 "↩️ آخرین تغییر بازگردانده شد.",
@@ -2526,8 +2543,11 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             next_db = future.pop()
             save_db(next_db)
         
-            context.user_data["current_node"] = "root"
-        
+            # 🔒 برای جلوگیری از کرش
+            current_node = context.user_data.get("current_node", "root")
+            target_node = find_valid_node(old_db, last_db, current_node)
+            context.user_data["current_node"] = "target_node"
+
             await update.message.reply_text(
                 "↪️ تغییر دوباره اعمال شد.",
                 reply_markup=get_keyboard("root", True)
