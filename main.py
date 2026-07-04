@@ -3483,92 +3483,151 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return WAITING_CONTENT
 
-async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # لغو
-    if update.message.text == "❌ لغو":
+def extract_message_content(msg):
+    raw_text = msg.text
+    raw_caption = msg.caption
+    
+    msg_entities = [e.to_dict() for e in msg.entities] if msg.entities else None
+    msg_caption_entities = [e.to_dict() for e in msg.caption_entities] if msg.caption_entities else None
+
+    if msg.photo:
+        return {
+            'type': 'photo',
+            'file_id': msg.photo[-1].file_id,
+            'caption': raw_caption,
+            'entities': msg_caption_entities
+        }
+
+    if msg.video:
+        return {
+            'type': 'video',
+            'file_id': msg.video.file_id,
+            'caption': raw_caption,
+            'entities': msg_caption_entities
+        }
+
+    if msg.document:
+        return {
+            'type': 'document',
+            'file_id': msg.document.file_id,
+            'caption': raw_caption,
+            'entities': msg_caption_entities
+        }
+
+    if msg.audio:
+        return {
+            'type': 'audio',
+            'file_id': msg.audio.file_id,
+            'caption': raw_caption,
+            'entities': msg_caption_entities
+        }
+
+    if msg.voice:
+        return {
+            'type': 'voice',
+            'file_id': msg.voice.file_id,
+            'caption': raw_caption,
+            'entities': msg_caption_entities
+        }
+
+    if msg.text and not msg.text.startswith('/'):
+        return {
+            'type': 'text',
+            'text': raw_text,
+            'entities': msg_entities
+        }
+
+    return None
+
+async def handle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    edited = update.edited_message
+    if not edited:
+        return
+
+    # بافر وجود دارد؟
+    temp = context.user_data.get('temp_content', [])
+    if not temp:
+        return
+
+    # پیدا کردن پیام مطابق با message_id
+    for item in temp:
+        if item.get("message_id") == edited.message_id:
+            # استخراج نسخه جدید محتوا
+            new_content = extract_message_content(edited)
+            if new_content:
+                new_content["message_id"] = edited.message_id
+                item.clear()
+                item.update(new_content)
+
+            try:
+                await edited.set_reaction("✏️")
+            except:
+                pass
+            break
+
+async def handle_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+
+    if msg.reply_to_message and msg.text == "حذف":
+        del_id = msg.reply_to_message.message_id
+        temp = context.user_data.get('temp_content', [])
+
+        before = len(temp)
+        temp[:] = [i for i in temp if i.get("message_id") != del_id]
+        after = len(temp)
+
+        if before != after:
+            await msg.reply_text("محتوا حذف شد. 🗑️")
+
+
+async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+
+    # اگر رسماً وارد مود افزودن محتوا نشده بودیم، بافر را نسازیم
+    if 'temp_content' not in context.user_data:
+        context.user_data['temp_content'] = []
+
+    # دکمه‌ها
+    if msg.text == "❌ لغو":
         current = context.user_data.get('current_node', 'root')
-        await update.message.reply_text(
-            "لغو شد.",
-            reply_markup=get_keyboard(current, True)
-        )
+        context.user_data['temp_content'] = []  # پاک کردن بافر
+        await update.message.reply_text("عملیات لغو شد.", reply_markup=get_keyboard(current, True))
         return CHOOSING
 
-    document = update.message.document
-    if not document:
-        await update.message.reply_text("❌ لطفاً ZIP یا JSON ارسال کنید.")
-        return WAITING_RESTORE_FILE
-
-    filename = document.file_name.lower()
-    file = await document.get_file()
-    byte_array = await file.download_as_bytearray()
-
-    try:
-        # ۱. آماده‌سازی کپشن لاگ‌گیری در ابتدا
-        desc = "📥 بکاپ جدید (ریستور دیتابیس) وارد شد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption) # ذخیره در کانتکست جهت همگام‌سازی
-
-        # ============================
-        # CASE 1: فایل JSON مستقیم
-        # ============================
-        if filename.endswith(".json"):
-            with open(DB_FILE, "wb") as f:
-                f.write(byte_array)
-
-            # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
-            upload_db_to_telegram(caption=caption)
-
-            # پاکسازی تاریخچه و ریستارت نود به root
-            context.user_data.pop("admin_history", None)
-            context.user_data.pop("admin_future", None)
-            context.user_data["current_node"] = "root"
-
-            await update.message.reply_text(
-                "✅ database.json با موفقیت وارد شد.",
-                reply_markup=get_keyboard("root", True)
-            )
+    if msg.text == "✅ ثبت نهایی":
+        temp = context.user_data.get('temp_content', [])
+        if not temp:
+            current = context.user_data.get('current_node', 'root')
+            await update.message.reply_text("چیزی برای ذخیره وجود نداشت.", reply_markup=get_keyboard(current, True))
             return CHOOSING
 
-        # ============================
-        # CASE 2: فایل ZIP شامل database.json
-        # ============================
-        if filename.endswith(".zip"):
-            with zipfile.ZipFile(iolib.BytesIO(byte_array)) as zf:
-                db_name = None
-                for name in zf.namelist():
-                    if name.endswith("database.json"):
-                        db_name = name
-                        break
+        current_node_id = context.user_data.get('current_node', 'root')
+        db = load_db()
 
-                if not db_name:
-                    await update.message.reply_text("❌ فایل ZIP فاقد database.json است.")
-                    return WAITING_RESTORE_FILE
+        if "contents" not in db[current_node_id]:
+            db[current_node_id]["contents"] = []
 
-                with open(DB_FILE, "wb") as f:
-                    f.write(zf.read(db_name))
+        db[current_node_id]["contents"].extend(temp)
 
-            # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
-            upload_db_to_telegram(caption=caption)
+        save_db(db, context=context)
+        context.user_data['temp_content'] = []  # پاک کردن بافر بعد از ذخیره
 
-            # پاکسازی تاریخچه و ریستارت نود به root
-            context.user_data.pop("admin_history", None)
-            context.user_data.pop("admin_future", None)
-            context.user_data["current_node"] = "root"
-            
-            await update.message.reply_text(
-                "✅ بکاپ ZIP با موفقیت وارد شد.",
-                reply_markup=get_keyboard("root", True)
-            )
-            return CHOOSING
+        await update.message.reply_text(f"{len(temp)} مورد ذخیره شد.", reply_markup=get_keyboard(current_node_id, True))
+        return CHOOSING
 
-        # اگر هیچکدام نبود:
-        await update.message.reply_text("❌ فقط ZIP یا JSON قابل قبول است.")
-        return WAITING_RESTORE_FILE
+    # دریافت محتوا + ذخیره همراه با message_id برای ادیت آینده
+    content = extract_message_content(msg)
+    if content:
+        # افزودن message_id
+        content["message_id"] = msg.message_id
+        context.user_data["temp_content"].append(content)
 
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطا در بازگردانی:\n{e}")
-        return WAITING_RESTORE_FILE
+        try:
+            await msg.set_reaction("👍")
+        except:
+            pass
 
+    return WAITING_CONTENT
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
