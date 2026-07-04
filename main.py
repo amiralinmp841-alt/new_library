@@ -2752,7 +2752,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
             await update.message.reply_text(
                 f"📂 {child_node['name']}\n"
-                f"<blockquote expandable>🗺 مسیر: {path_str}</blockquote>"
+                f"<blockquote expandable>🗺 مسیر: {path_str}</blockquote>",
                 reply_markup=get_keyboard(child_id, is_admin),
                 parse_mode="HTML",
                 disable_web_page_preview=True
