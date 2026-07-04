@@ -1104,8 +1104,9 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
     help_text = (
-        "\n\n⚙️ برای خاموش یا روشن کردن سرچ هوشمند، از دستور /on_of_search استفاده کنید.\n"
-    )
+        """🔍 نتیجه‌ای در این پوشه یافت نشد.
+⚠️ توجه! فقط مسیرهای موجود در این پوشه‌ای که قرار دارید، سرچ می‌شود. برای سرچ کلی‌تر، در صفحه اصلی سرچ را انجام دهید!""" + help_text,
+        )
 
     if not results:
         await update.message.reply_text(
@@ -1264,7 +1265,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
            یا اینکه از دکمه‌های آماده استفاده کنید.
 
-    ⚙️ برای خاموش و روشن کردن سرچ هوشمند، از کامند /on_of_search استفاده کنید.
+    ⚙️ برای خاموش و روشن کردن سرچ هوشمند، از دستور /on_of_search استفاده کنید.
 
     🤝 درصورت مشاهده اشکال در محتوای پوشه‌ها، می‌توانید با دستور /report، محتوای آخرین پوشه‌ای که در آن بودید را به ما گزارش دهید و در توسعه محتوای ربات، کمکمان کنید.
 
