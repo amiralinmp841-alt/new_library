@@ -873,7 +873,7 @@ def set_report_page(context: ContextTypes.DEFAULT_TYPE, node_id: str):
     ذخیره صفحه فعلی برای قابلیت /report
     """
     context.user_data["current_report_node"] = node_id
-
+    
 async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=False)
 
@@ -881,68 +881,110 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
 
     if is_user_banned(user_id):
-        await update.message.reply_text("⛔️ شما از ربات بن شده‌اید.")
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از ربات را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return CHOOSING
 
     if not REPORT_GROUP_ID:
-        await update.message.reply_text("❌ گروه گزارشات تنظیم نشده.")
+        await update.message.reply_text("❌ گروه گزارشات برای ربات تنظیم نشده است.")
         return CHOOSING
 
     db = load_db()
     bot_username = context.bot.username
-    msg = update.message
 
-    # ============================================
-    # 1) گزارش فایل — اگر روی پیام ربات ریپلای شده باشد
-    # ============================================
-    if msg.reply_to_message:
-        replied_msg_id = msg.reply_to_message.message_id
-        sent_mapping = context.user_data.get("sent_mapping", {})
-        target = sent_mapping.get(replied_msg_id)
+    full_name = html.escape(user.full_name or "بدون نام")
+    username = user.username
 
-        if target:
-            node_id = target["node_id"]
-            content_index = target["content_index"]
+    if username:
+        username_text = f"@{html.escape(username)}"
+    else:
+        username_text = "ندارد"
+
+    user_link = f'<a href="tg://user?id={user.id}">{full_name}</a>'
+
+    try:
+        # حالت 1: ریپورت فایل/محتوا با ریپلای روی پیام ربات
+        if update.message.reply_to_message:
+            replied_msg_id = update.message.reply_to_message.message_id
+            sent_mapping = context.user_data.get("sent_mapping", {})
+            target = sent_mapping.get(replied_msg_id)
+
+            if not target:
+                await update.message.reply_text("❌ این پیام از محتوای قابل‌شناسایی ربات نیست.")
+                return CHOOSING
+
+            node_id = target.get("node_id")
+            content_index = target.get("content_index")
 
             if node_id not in db:
-                await msg.reply_text("❌ فایل مربوط به دیتابیس نیست.")
+                await update.message.reply_text("❌ پوشه مربوط به این محتوا پیدا نشد.")
                 return CHOOSING
 
             contents = db[node_id].get("contents", [])
             if not (0 <= content_index < len(contents)):
-                await msg.reply_text("❌ این فایل دیگر وجود ندارد.")
+                await update.message.reply_text("❌ فایل یا محتوای موردنظر دیگر در این پوشه وجود ندارد.")
                 return CHOOSING
 
+            node = db[node_id]
             item = contents[content_index]
-            file_type = item["type"]
-            caption = html.escape(item.get("caption", "") or "")
-            file_id = html.escape(item.get("file_id", ""))
 
-            # ساخت دیپ‌لینک فایل
+            page_name = html.escape(node.get("name", "بدون نام"))
+            path_text = html.escape(get_node_path_text(db, node_id))
+
+            content_type = item.get("type", "unknown")
+            content_type_map = {
+                "text": "متن",
+                "photo": "عکس",
+                "video": "ویدیو",
+                "document": "فایل",
+                "audio": "صوت",
+                "voice": "ویس",
+            }
+            content_type_text = content_type_map.get(content_type, content_type)
+
             deep_link = f"https://t.me/{bot_username}?start=file__{node_id}__{content_index}"
 
-            # مسیر پوشه
-            path_html = get_node_path_html(db, node_id, bot_username)
+            caption_or_text = ""
+            if content_type == "text":
+                caption_or_text = item.get("text", "") or ""
+            else:
+                caption_or_text = item.get("caption", "") or ""
 
-            full_name = html.escape(user.full_name or "بدون نام")
-            username = user.username
-            username_text = f"@{html.escape(username)}" if username else "ندارد"
-            user_link = f'<a href="tg://user?id={user.id}">{full_name}</a>'
+            caption_or_text = caption_or_text.strip()
+            if len(caption_or_text) > 700:
+                caption_or_text = caption_or_text[:700] + "..."
 
-            # متن گزارش برای مدیر
+            if caption_or_text:
+                content_preview = html.escape(caption_or_text)
+            else:
+                content_preview = "ندارد"
+
+            file_hash = html.escape(f"{node_id}__{content_index}")
+
             report_text = (
-                "🚨 <b>گزارش فایل</b>\n\n"
-                f"👤 <b>کاربر:</b> {user_link}\n"
-                f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
+                "🚨 <b>گزارش فایل / محتوا</b>\n\n"
+                f"👤 <b>کاربر گزارش‌دهنده:</b> {user_link}\n"
+                f"🆔 <b>آیدی عددی کاربر:</b> <code>{user.id}</code>\n"
                 f"🔗 <b>یوزرنیم:</b> <code>{username_text}</code>\n\n"
-                f"📄 <b>پوشه:</b> {path_html}\n"
-                f"🗂 <b>نوع فایل:</b> {file_type}\n"
-                f"💬 <b>کپشن فایل:</b>\n{caption or '---'}\n\n"
-                f"🔑 <b>هش فایل:</b>\n<code>{node_id} | index={content_index}</code>\n\n"
+                f"📂 <b>نام پوشه:</b> {page_name}\n"
+                f"📍 <b>مسیر پوشه:</b>\n{path_text}\n\n"
+                f"🗂 <b>نوع محتوا:</b> {html.escape(content_type_text)}\n"
+                f"🔢 <b>اندیس محتوا:</b> <code>{content_index}</code>\n"
+                f"🔑 <b>هش محتوا:</b>\n<code>{file_hash}</code>\n\n"
+                f"📝 <b>متن/کپشن:</b>\n{content_preview}\n\n"
+                f"🔗 <b>دیپ‌لینک فایل:</b>\n{html.escape(deep_link)}"
+            )
+
+            user_reply = (
+                "✅ گزارش فایل برای مدیریت ارسال شد.\n\n"
+                f"🗂 <b>نوع محتوا:</b> {html.escape(content_type_text)}\n"
+                f"📂 <b>نام پوشه:</b> {page_name}\n"
+                f"📍 <b>مسیر پوشه:</b>\n{path_text}\n\n"
                 f"🔗 <b>دیپ‌لینک فایل:</b>\n<code>{html.escape(deep_link)}</code>"
             )
 
-            # ارسال گزارش به گروه مدیریت
             await context.bot.send_message(
                 chat_id=REPORT_GROUP_ID,
                 text=report_text,
@@ -950,59 +992,57 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 disable_web_page_preview=True
             )
 
-            # پیام برای کاربر
-            await msg.reply_text(
-                "✅ فایل موردنظر شما برای مدیریت گزارش شد.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-
+            await update.message.reply_text(user_reply, parse_mode="HTML")
             return CHOOSING
 
-    # ============================================
-    # 2) گزارش پوشه — حالت عادی بدون ریپلای فایل
-    # ============================================
-    node_id = context.user_data.get("current_report_node") or context.user_data.get("current_node", "root")
+        # حالت 2: ریپورت صفحه/پوشه مثل قبل
+        node_id = context.user_data.get("current_report_node")
+        if not node_id:
+            node_id = context.user_data.get("current_node", "root")
 
-    if node_id not in db:
-        await msg.reply_text("❌ صفحه فعلی برای گزارش پیدا نشد.")
-        return CHOOSING
+        if node_id not in db:
+            await update.message.reply_text("❌ صفحه فعلی برای گزارش پیدا نشد.")
+            return CHOOSING
 
-    node = db[node_id]
+        node = db[node_id]
+        deep_link = f"https://t.me/{bot_username}?start={node_id}"
 
-    deep_link = f"https://t.me/{bot_username}?start={node_id}"
-    page_name = html.escape(node.get("name", "بدون نام"))
-    path_text = html.escape(get_node_path_text(db, node_id))
+        page_name = html.escape(node.get("name", "بدون نام"))
+        path_text = html.escape(get_node_path_text(db, node_id))
 
-    full_name = html.escape(user.full_name or "بدون نام")
-    username = user.username
+        report_text = (
+            "🚨 <b>گزارش صفحه</b>\n\n"
+            f"👤 <b>کاربر گزارش‌دهنده:</b> {user_link}\n"
+            f"🆔 <b>آیدی عددی کاربر:</b> <code>{user.id}</code>\n"
+            f"🔗 <b>یوزرنیم:</b> <code>{username_text}</code>\n\n"
+            f"📄 <b>نام صفحه:</b> {page_name}\n"
+            f"📂 <b>مسیر صفحه:</b>\n{path_text}\n\n"
+            f"🔑 <b>هش صفحه:</b>\n<code>{html.escape(node_id)}</code>\n\n"
+            f"🔗 <b>دیپ‌لینک صفحه:</b>\n{html.escape(deep_link)}"
+        )
 
-    username_text = f"@{html.escape(username)}" if username else "ندارد"
-    user_link = f'<a href="tg://user?id={user.id}">{full_name}</a>'
+        user_reply = (
+            "✅ گزارش شما با موفقیت برای مدیریت ارسال شد.\n\n"
+            f"📄 <b>نام صفحه:</b> {page_name}\n"
+            f"📂 <b>مسیر صفحه:</b>\n{path_text}\n\n"
+            f"🔗 <b>دیپ‌لینک صفحه:</b>\n<code>{html.escape(deep_link)}</code>"
+        )
 
-    report_text = (
-        "🚨 <b>گزارش صفحه</b>\n\n"
-        f"👤 <b>کاربر:</b> {user_link}\n"
-        f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
-        f"🔗 <b>یوزرنیم:</b> <code>{username_text}</code>\n\n"
-        f"📄 <b>نام صفحه:</b> {page_name}\n"
-        f"📂 <b>مسیر:</b>\n{path_text}\n\n"
-        f"🔑 <b>هش:</b> <code>{html.escape(node_id)}</code>\n\n"
-        f"🔗 <b>دیپ‌لینک:</b>\n<code>{html.escape(deep_link)}</code>"
-    )
+        await context.bot.send_message(
+            chat_id=REPORT_GROUP_ID,
+            text=report_text,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
 
-    await context.bot.send_message(
-        chat_id=REPORT_GROUP_ID,
-        text=report_text,
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
+        await update.message.reply_text(user_reply, parse_mode="HTML")
 
-    await msg.reply_text(
-        "✅ گزارش این صفحه ارسال شد.",
-        parse_mode="HTML"
-    )
+    except Exception as e:
+        print("Failed to send report:", e)
+        await update.message.reply_text("❌ ارسال گزارش با خطا مواجه شد.")
 
     return CHOOSING
+
 
 async def send_single_content_by_item(message, item):
     msg_type = item["type"]
