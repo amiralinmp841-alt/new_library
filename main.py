@@ -1041,8 +1041,15 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     # جستجو در زیرشاخه
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
+    help_text = (
+        "\n\nبرای خاموش یا روشن کردن سرچ هوشمند، از دستور /on_of_search استفاده کنید.\n"
+    )
+
     if not results:
-        await update.message.reply_text("🔍 نتیجه‌ای در این پوشه یافت نشد.")
+        await update.message.reply_text(
+            "🔍 نتیجه‌ای در این پوشه یافت نشد." + help_text,
+            parse_mode="HTML"
+        )
         return CHOOSING
 
     bot_username = context.bot.username
@@ -1058,9 +1065,10 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # فرمت‌دهی با لینک HTML (قابل کلیک)
         msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
-        msg += f"امتیاز تطابق: {int(item['score'])}٪\n\n"
+        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
     msg += "روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید."
+    msg += help_text
 
     await update.message.reply_text(
         msg, 
@@ -1068,6 +1076,40 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         disable_web_page_preview=True
     )
 
+    return CHOOSING
+
+async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user:
+        return CHOOSING
+    
+    user_id = str(user.id)
+    userdata = load_userdata()
+    users = userdata.setdefault("users", {})
+    
+    # اگر کاربر در دیتابیس نبود، ابتدا او را ثبت یا داده‌ی پیش‌فرض می‌گذاریم
+    if user_id not in users:
+        # برای ثبت مشخصات اولیه
+        track_user_activity(update, count_message=False)
+        userdata = load_userdata()  # بازخوانی دیتای جدید
+        users = userdata.get("users", {})
+
+    # خواندن وضعیت (اگر مقدار نبود، پیش‌فرض False است؛ یعنی سرچ هوشمند فعال/روشن است)
+    is_disabled = users.get(user_id, {}).get("smart_search_disabled", False)
+    
+    # تغییر وضعیت (معکوس کردن)
+    new_disabled_status = not is_disabled
+    users[user_id]["smart_search_disabled"] = new_disabled_status
+    
+    # ذخیره در فایل
+    save_userdata(userdata, upload=True)
+    
+    # پیام به کاربر بر اساس وضعیت جدید
+    if new_disabled_status:
+        await update.message.reply_text("🔴 سرچ هوشمند برای شما <b>خاموش</b> شد.", parse_mode="HTML")
+    else:
+        await update.message.reply_text("🟢 سرچ هوشمند برای شما مجدداً <b>روشن</b> شد.", parse_mode="HTML")
+        
     return CHOOSING
 
 # --- HANDLERS ---
@@ -1154,12 +1196,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.9)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.11)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
-    مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
-    
-    یا اینکه از دکمه‌های آماده استفاده کنید.""",
+           مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
+           یا اینکه از دکمه‌های آماده استفاده کنید.
+
+    ⚙️ برای خاموش و روشن کردن سرچ هوشمند، از کامند /on_of_search استفاده کنید.
+
+    🤝 درصورت مشاهده اشکال در محتوای پوشه‌ها، می‌توانید با دستور /report، محتوای آخرین پوشه‌ای که در آن بودید را به ما گزارش دهید و در توسعه محتوای ربات، کمکمان کنید.
+
+    🔗 جهت دریافت لینک هر پوشه و اشتراک گذاری آن، از دستور /deeplink استفاده کنید. 
+
+    👨‍💻 پیشنهادات و انتقادات خود را با ما، درمیان بگذارید. پیام به ادمین: /chat """,
+
         reply_markup=get_keyboard("root", is_admin)
     )
     return CHOOSING
@@ -2509,9 +2559,9 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⛔️ چیزی برای بازگشت وجود ندارد.")
                 return CHOOSING
         
+            old_db = load_db()
             # وضعیت فعلی میره تو future
             future.append(copy.deepcopy(load_db()))
-        
             # آخرین snapshot
             last_db = history.pop()
             save_db(last_db)
@@ -2519,7 +2569,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 🔒 برای جلوگیری از کرش
             current_node = context.user_data.get("current_node", "root")
             target_node = find_valid_node(old_db, last_db, current_node)
-            context.user_data["current_node"] = "target_node"
+            context.user_data["current_node"] = target_node
         
             await update.message.reply_text(
                 "↩️ آخرین تغییر بازگردانده شد.",
@@ -2536,17 +2586,17 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not future:
                 await update.message.reply_text("⛔️ چیزی برای جلو رفتن نیست.")
                 return CHOOSING
-        
+
+            old_db = load_db()
             # وضعیت فعلی بره history
             history.append(copy.deepcopy(load_db()))
-        
             next_db = future.pop()
             save_db(next_db)
         
             # 🔒 برای جلوگیری از کرش
             current_node = context.user_data.get("current_node", "root")
-            target_node = find_valid_node(old_db, last_db, current_node)
-            context.user_data["current_node"] = "target_node"
+            target_node = find_valid_node(old_db, next_db, current_node)
+            context.user_data["current_node"] = target_node
 
             await update.message.reply_text(
                 "↪️ تغییر دوباره اعمال شد.",
@@ -2588,7 +2638,22 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_node_contents(update, context, child_id)
             return CHOOSING
 
-    # ✅ اگر دکمه نبود، سرچ کن
+    # 🔍 چک کردن وضعیت سرچ هوشمند کاربر قبل از جستجو
+    user_id = str(update.effective_user.id)
+    userdata = load_userdata()
+    users = userdata.get("users", {})
+    # پیش‌فرض برای همه True (روشن) است. اگر فیلد smart_search_disabled معادل True باشد یعنی خاموش است.
+    is_disabled = users.get(user_id, {}).get("smart_search_disabled", False)
+    
+    if is_disabled:
+        # اگر سرچ خاموش باشد، پاسخی ارسال نمی‌شود یا می‌توانید یک پیام ساده دهید:
+        await update.message.reply_text(
+            "⚠️ سرچ هوشمند برای شما غیرفعال است.\n"
+            "برای فعال کردن مجدد آن از دستور /on_of_search استفاده کنید."
+        )
+        return CHOOSING
+
+    # ✅ اگر دکمه نبود و سرچ هوشمند روشن بود، سرچ کن
     return await handle_smart_search(update, context, text, is_admin)
 
 async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3252,6 +3317,8 @@ def build_application():
         group=0
     )
 
+    application.add_handler(CommandHandler("on_of_search", toggle_smart_search), group=0)
+
     # ConversationHandler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -3260,6 +3327,7 @@ def build_application():
                 CommandHandler("report", report_page),
                 CommandHandler("deeplink", deeplink_command),
                 CommandHandler("chat", start_chat_with_admin),
+                CommandHandler("on_of_search", toggle_smart_search),
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation)
