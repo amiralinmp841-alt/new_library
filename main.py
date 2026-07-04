@@ -1154,7 +1154,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.8)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.9)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
     مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -2523,7 +2523,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
             await update.message.reply_text(
                 "↩️ آخرین تغییر بازگردانده شد.",
-                reply_markup=get_keyboard("root", True)
+                reply_markup=get_keyboard("target_node", True)
             )
             return CHOOSING
         
@@ -2550,7 +2550,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 "↪️ تغییر دوباره اعمال شد.",
-                reply_markup=get_keyboard("root", True)
+                reply_markup=get_keyboard("target_node", True)
             )
             return CHOOSING
         
@@ -2658,7 +2658,6 @@ async def set_admin_password(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
 async def restore_userdata(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-
     text = update.message.text
 
     if text in ["❌ لغو", "🔙 بازگشت"]:
@@ -2677,45 +2676,77 @@ async def restore_userdata(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["admin_panel"] = "access"
         return CHOOSING
     
-    # بقیه کد ریستور userdata که قبلاً نوشته بودیم
 
+    # ------------------------------
+    # 📌 مرحله دریافت فایل
+    # ------------------------------
     doc = update.message.document
-    if not doc or not doc.file_name.endswith(".zip"):
-        await update.message.reply_text("❌ فایل ZIP معتبر نیست")
+    if not doc:
+        await update.message.reply_text("❌ لطفاً یک فایل ZIP یا JSON بفرستید.")
         return WAITING_USERDATA_UPLOAD
 
+    filename = doc.file_name.lower()
     file = await doc.get_file()
     file_bytes = await file.download_as_bytearray()
 
     try:
-        with zipfile.ZipFile(iolib.BytesIO(file_bytes)) as zipf:
-            if "userdata.json" not in zipf.namelist():
-                await update.message.reply_text("❌ userdata.json داخل فایل نیست")
-                return WAITING_USERDATA_UPLOAD
+        # ============================
+        # CASE 1: فایل مستقیم JSON
+        # ============================
+        if filename.endswith(".json"):
+            userdata = json.loads(file_bytes.decode("utf-8"))
+            save_userdata(userdata)
 
-            userdata = json.loads(zipf.read("userdata.json").decode("utf-8"))
+            context.user_data.pop("admin_waiting_from", None)
+            
+            await update.message.reply_text(
+                "✅ userdata.json با موفقیت بازیابی شد.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            
+            await update.message.reply_text(
+                "🔐 پنل مدیریت:",
+                reply_markup=get_admin_access_inline_keyboard()
+            )
+            context.user_data["admin_panel"] = "access"
 
-        save_userdata(userdata)
+            context.user_data.setdefault("current_node", "root")
+            return CHOOSING
 
-        context.user_data.pop("admin_waiting_from", None)
-        
-        await update.message.reply_text(
-            "✅ userdata با موفقیت بازیابی شد",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        
-        await update.message.reply_text(
-            "🔐 پنل مدیریت:",
-            reply_markup=get_admin_access_inline_keyboard()
-        )
-        
-        context.user_data["admin_panel"] = "access"
-        
-        # current_node را دست نزن؛ اگر نبود، root بگذار
-        context.user_data.setdefault("current_node", "root")
-        
-        return CHOOSING
-        
+        # ============================
+        # CASE 2: فایل ZIP شامل userdata.json
+        # ============================
+        if filename.endswith(".zip"):
+
+            with zipfile.ZipFile(iolib.BytesIO(file_bytes)) as zipf:
+                if "userdata.json" not in zipf.namelist():
+                    await update.message.reply_text("❌ فایل ZIP فاقد userdata.json است.")
+                    return WAITING_USERDATA_UPLOAD
+
+                userdata = json.loads(zipf.read("userdata.json").decode("utf-8"))
+
+            save_userdata(userdata)
+
+            context.user_data.pop("admin_waiting_from", None)
+
+            await update.message.reply_text(
+                "✅ userdata از ZIP بازیابی شد.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+
+            await update.message.reply_text(
+                "🔐 پنل مدیریت:",
+                reply_markup=get_admin_access_inline_keyboard()
+            )
+
+            context.user_data["admin_panel"] = "access"
+            context.user_data.setdefault("current_node", "root")
+            return CHOOSING
+
+        # اگر هیچکدام نبود:
+        await update.message.reply_text("❌ فقط ZIP یا JSON قابل قبول است.")
+        return WAITING_USERDATA_UPLOAD
+
     except Exception as e:
         await update.message.reply_text(f"❌ خطا در بازیابی:\n{e}")
         return WAITING_USERDATA_UPLOAD
@@ -3106,6 +3137,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_CONTENT
 
 async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     # لغو
     if update.message.text == "❌ لغو":
         current = context.user_data.get('current_node', 'root')
@@ -3116,48 +3148,71 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return CHOOSING
 
     document = update.message.document
-    if not document or not document.file_name.endswith(".zip"):
-        await update.message.reply_text("لطفاً یک فایل ZIP ارسال کنید.")
+    if not document:
+        await update.message.reply_text("❌ لطفاً ZIP یا JSON ارسال کنید.")
         return WAITING_RESTORE_FILE
 
+    filename = document.file_name.lower()
     file = await document.get_file()
     byte_array = await file.download_as_bytearray()
 
     try:
-        with zipfile.ZipFile(iolib.BytesIO(byte_array)) as zf:
-            # 🔍 پیدا کردن database.json بدون توجه به مسیر
-            db_name = None
-            for name in zf.namelist():
-                if name.endswith("database.json"):
-                    db_name = name
-                    break
-
-            if not db_name:
-                await update.message.reply_text(
-                    "❌ فایل database.json در بکاپ یافت نشد."
-                )
-                return WAITING_RESTORE_FILE
-
-            # ✅ نوشتن دیتابیس
+        # ============================
+        # CASE 1: فایل JSON مستقیم
+        # ============================
+        if filename.endswith(".json"):
             with open(DB_FILE, "wb") as f:
-                f.write(zf.read(db_name))
+                f.write(byte_array)
+
             upload_db_to_telegram()
 
-        # 🔥 پاک کردن لاگ تغییرات ادمین
-        context.user_data.pop("admin_history", None)
-        context.user_data.pop("admin_future", None)
+            context.user_data.pop("admin_history", None)
+            context.user_data.pop("admin_future", None)
+            context.user_data["current_node"] = "root"
 
-        context.user_data["current_node"] = "root"
+            await update.message.reply_text(
+                "✅ database.json با موفقیت وارد شد.",
+                reply_markup=get_keyboard("root", True)
+            )
+            return CHOOSING
 
-        await update.message.reply_text(
-            "✅ بکاپ با موفقیت وارد شد.\n"
-            "🔄 تاریخچه تغییرات پاک شد.",
-            reply_markup=get_keyboard("root", True)
-        )
-        return CHOOSING
+        # ============================
+        # CASE 2: فایل ZIP شامل database.json
+        # ============================
+        if filename.endswith(".zip"):
+
+            with zipfile.ZipFile(iolib.BytesIO(byte_array)) as zf:
+                db_name = None
+                for name in zf.namelist():
+                    if name.endswith("database.json"):
+                        db_name = name
+                        break
+
+                if not db_name:
+                    await update.message.reply_text("❌ فایل ZIP فاقد database.json است.")
+                    return WAITING_RESTORE_FILE
+
+                with open(DB_FILE, "wb") as f:
+                    f.write(zf.read(db_name))
+
+            upload_db_to_telegram()
+
+            context.user_data.pop("admin_history", None)
+            context.user_data.pop("admin_future", None)
+            context.user_data["current_node"] = "root"
+
+            await update.message.reply_text(
+                "✅ بکاپ ZIP با موفقیت وارد شد.",
+                reply_markup=get_keyboard("root", True)
+            )
+            return CHOOSING
+
+        # اگر هیچکدام نبود:
+        await update.message.reply_text("❌ فقط ZIP یا JSON قابل قبول است.")
+        return WAITING_RESTORE_FILE
 
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در بازگردانی: {e}")
+        await update.message.reply_text(f"❌ خطا در بازگردانی:\n{e}")
         return WAITING_RESTORE_FILE
 
 
