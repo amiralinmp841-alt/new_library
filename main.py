@@ -3380,150 +3380,173 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 
-async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-
-    # اگر رسماً وارد مود افزودن محتوا نشده بودیم، بافر را نسازیم
-    if 'temp_content' not in context.user_data:
-        context.user_data['temp_content'] = []
-
-    # دکمه‌ها
-    if msg.text == "❌ لغو":
-        current = context.user_data.get('current_node', 'root')
-        context.user_data['temp_content'] = []  # پاک کردن بافر
-        await update.message.reply_text("عملیات لغو شد.", reply_markup=get_keyboard(current, True))
-        return CHOOSING
-
-    if msg.text == "✅ ثبت نهایی":
-        temp = context.user_data.get('temp_content', [])
-        if not temp:
-            current = context.user_data.get('current_node', 'root')
-            await update.message.reply_text("چیزی برای ذخیره وجود نداشت.", reply_markup=get_keyboard(current, True))
-            return CHOOSING
-
-        current_node_id = context.user_data.get('current_node', 'root')
-        db = load_db()
-
-        if "contents" not in db[current_node_id]:
-            db[current_node_id]["contents"] = []
-
-        db[current_node_id]["contents"].extend(temp)
-
-        save_db(db, context=context)
-        context.user_data['temp_content'] = []  # پاک کردن بافر بعد از ذخیره
-
-        await update.message.reply_text(f"{len(temp)} مورد ذخیره شد.", reply_markup=get_keyboard(current_node_id, True))
-        return CHOOSING
-
-    # دریافت محتوا + ذخیره همراه با message_id برای ادیت آینده
-    content = extract_message_content(msg)
-    if content:
-        # افزودن message_id
-        content["message_id"] = msg.message_id
-        context.user_data["temp_content"].append(content)
-
-        try:
-            await msg.set_reaction("👍")
-        except:
-            pass
-
-    return WAITING_CONTENT
-
 def extract_message_content(msg):
     raw_text = msg.text
     raw_caption = msg.caption
-    
+
     msg_entities = [e.to_dict() for e in msg.entities] if msg.entities else None
     msg_caption_entities = [e.to_dict() for e in msg.caption_entities] if msg.caption_entities else None
 
     if msg.photo:
         return {
-            'type': 'photo',
-            'file_id': msg.photo[-1].file_id,
-            'caption': raw_caption,
-            'entities': msg_caption_entities
+            "type": "photo",
+            "file_id": msg.photo[-1].file_id,
+            "caption": raw_caption,
+            "entities": msg_caption_entities,
         }
 
     if msg.video:
         return {
-            'type': 'video',
-            'file_id': msg.video.file_id,
-            'caption': raw_caption,
-            'entities': msg_caption_entities
+            "type": "video",
+            "file_id": msg.video.file_id,
+            "caption": raw_caption,
+            "entities": msg_caption_entities,
         }
 
     if msg.document:
         return {
-            'type': 'document',
-            'file_id': msg.document.file_id,
-            'caption': raw_caption,
-            'entities': msg_caption_entities
+            "type": "document",
+            "file_id": msg.document.file_id,
+            "caption": raw_caption,
+            "entities": msg_caption_entities,
         }
 
     if msg.audio:
         return {
-            'type': 'audio',
-            'file_id': msg.audio.file_id,
-            'caption': raw_caption,
-            'entities': msg_caption_entities
+            "type": "audio",
+            "file_id": msg.audio.file_id,
+            "caption": raw_caption,
+            "entities": msg_caption_entities,
         }
 
     if msg.voice:
         return {
-            'type': 'voice',
-            'file_id': msg.voice.file_id,
-            'caption': raw_caption,
-            'entities': msg_caption_entities
+            "type": "voice",
+            "file_id": msg.voice.file_id,
+            "caption": raw_caption,
+            "entities": msg_caption_entities,
         }
 
     if msg.text and not msg.text.startswith('/'):
         return {
-            'type': 'text',
-            'text': raw_text,
-            'entities': msg_entities
+            "type": "text",
+            "text": raw_text,
+            "entities": msg_entities,
         }
 
     return None
-    
+
+
+async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    text = msg.text
+
+    temp_content = context.user_data.get("temp_content")
+    if temp_content is None:
+        current = context.user_data.get("current_node", "root")
+        await msg.reply_text(
+            "ابتدا از طریق دکمه '➕ افزودن محتوا' وارد حالت افزودن محتوا شوید.",
+            reply_markup=get_keyboard(current, True),
+        )
+        return CHOOSING
+
+    if text == "❌ لغو":
+        current = context.user_data.get("current_node", "root")
+        context.user_data.pop("temp_content", None)
+        await msg.reply_text("عملیات لغو شد.", reply_markup=get_keyboard(current, True))
+        return CHOOSING
+
+    if text == "✅ ثبت نهایی":
+        if not temp_content:
+            current = context.user_data.get("current_node", "root")
+            context.user_data.pop("temp_content", None)
+            await msg.reply_text("چیزی برای ذخیره وجود نداشت.", reply_markup=get_keyboard(current, True))
+            return CHOOSING
+
+        current_node_id = context.user_data.get("current_node", "root")
+        db = load_db()
+        push_admin_history(context, db)
+
+        if "contents" not in db[current_node_id]:
+            db[current_node_id]["contents"] = []
+
+        final_contents = []
+        for item in temp_content:
+            saved_item = {k: v for k, v in item.items() if k != "message_id"}
+            final_contents.append(saved_item)
+
+        db[current_node_id]["contents"].extend(final_contents)
+
+        bot_username = context.bot.username
+        node_name = db[current_node_id]["name"]
+        node_link = get_link(current_node_id, node_name, bot_username)
+        desc = f"📄 {len(final_contents)} فایل جدید به پوشه {node_link} اضافه شد."
+        caption = format_admin_log(update.effective_user, desc)
+        set_pending_caption(context, caption)
+
+        save_db(db, context=context)
+        context.user_data.pop("temp_content", None)
+
+        await msg.reply_text(
+            f"{len(final_contents)} مورد ذخیره شد.",
+            reply_markup=get_keyboard(current_node_id, True),
+        )
+        return CHOOSING
+
+    if text == "حذف" and msg.reply_to_message:
+        del_id = msg.reply_to_message.message_id
+        before = len(temp_content)
+        temp_content[:] = [item for item in temp_content if item.get("message_id") != del_id]
+
+        if len(temp_content) != before:
+            await msg.reply_text("محتوا از لیست موقت حذف شد.")
+        else:
+            await msg.reply_text("این پیام در لیست موقت پیدا نشد.")
+
+        return WAITING_CONTENT
+
+    content = extract_message_content(msg)
+    if content:
+        content["message_id"] = msg.message_id
+        temp_content.append(content)
+
+        try:
+            await msg.set_reaction("👍")
+        except Exception:
+            pass
+
+    return WAITING_CONTENT
+
 async def handle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     edited = update.edited_message
     if not edited:
         return
 
-    # بافر وجود دارد؟
-    temp = context.user_data.get('temp_content', [])
-    if not temp:
+    temp_content = context.user_data.get("temp_content")
+    if not temp_content:
         return
 
-    # پیدا کردن پیام مطابق با message_id
-    for item in temp:
-        if item.get("message_id") == edited.message_id:
-            # استخراج نسخه جدید محتوا
-            new_content = extract_message_content(edited)
-            if new_content:
-                new_content["message_id"] = edited.message_id
-                item.clear()
-                item.update(new_content)
+    for index, item in enumerate(temp_content):
+        if item.get("message_id") != edited.message_id:
+            continue
 
-            try:
-                await edited.set_reaction("✏️")
-            except:
-                pass
-            break
+        new_content = extract_message_content(edited)
 
-async def handle_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
+        if new_content is None:
+            temp_content.pop(index)
+        else:
+            new_content["message_id"] = edited.message_id
+            temp_content[index] = new_content
 
-    if msg.reply_to_message and msg.text == "حذف":
-        del_id = msg.reply_to_message.message_id
-        temp = context.user_data.get('temp_content', [])
+        try:
+            await edited.set_reaction("✏️")
+        except Exception:
+            pass
 
-        before = len(temp)
-        temp[:] = [i for i in temp if i.get("message_id") != del_id]
-        after = len(temp)
+        break
 
-        if before != after:
-            await msg.reply_text("محتوا حذف شد. 🗑️")
+
+
 
 
 async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3630,7 +3653,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ======== BUILD APPLICATION ========  ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ======== ======== BUILD APPLICATION ========
 def build_application():
-
     # ساخت اپلیکیشن ربات
     application = ApplicationBuilder().token(TOKEN).build()
 
@@ -3651,6 +3673,12 @@ def build_application():
 
     application.add_handler(CommandHandler("on_of_search", toggle_smart_search), group=0)
 
+    # ✏️ ثبت هندلر ویرایش پیام‌ها (این هندلر ادیت‌های ادمین در حالت انتظار محتوا را ردیابی می‌کند)
+    application.add_handler(
+        MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edit),
+        group=2
+    )
+
     # ConversationHandler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -3666,6 +3694,7 @@ def build_application():
             WAITING_BUTTON_NAME: [
                 MessageHandler(filters.TEXT & (~filters.COMMAND), add_button_name)
             ],
+            # در این استیت، تمام پیام‌های جدید ارسالی ادمین وارد بافر موقت می‌شوند
             WAITING_CONTENT: [
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_content)
             ],
@@ -3681,7 +3710,7 @@ def build_application():
             ],
             WAITING_USERDATA_UPLOAD: [
                 MessageHandler(filters.Document.ALL, restore_userdata),
-                MessageHandler(filters.TEXT & (~filters.COMMAND), restore_userdata)  # برای لغو یا متن اشتباه
+                MessageHandler(filters.TEXT & (~filters.COMMAND), restore_userdata)
             ],
             WAITING_ADD_ADMIN: [
                 MessageHandler(filters.TEXT & (~filters.COMMAND), add_sub_admin)
