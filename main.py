@@ -1040,22 +1040,45 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
     for item in contents:
         try:
             msg_type = item['type']
+            saved_entities = item.get('entities') # دریافت ساختار استایل‌ها از دیتابیس
+            
             if msg_type == 'text':
-                await update.message.reply_text(item['text'], parse_mode="HTML")
+                if saved_entities is not None:
+                    # ارسال با استایل‌های اختصاصی از جمله کوت‌ها
+                    await update.message.reply_text(
+                        text=item['text'], 
+                        entities=saved_entities
+                    )
+                else:
+                    # روش بک‌آپ برای پیام‌های قدیمی بدون فیلد entities
+                    await update.message.reply_text(
+                        text=item['text'], 
+                        parse_mode="HTML"
+                    )
             else:
                 file_id = item['file_id']
                 caption = item.get('caption', '')
+                
+                # تنظیمات آرگومان‌های ارسال رسانه
+                send_args = {
+                    "caption": caption
+                }
+                if saved_entities is not None:
+                    send_args["caption_entities"] = saved_entities
+                else:
+                    send_args["parse_mode"] = "HTML"
             
                 if msg_type == 'photo':
-                    await update.message.reply_photo(photo=file_id, caption=caption, parse_mode="HTML")
+                    await update.message.reply_photo(photo=file_id, **send_args)
                 elif msg_type == 'video':
-                    await update.message.reply_video(video=file_id, caption=caption, parse_mode="HTML")
+                    await update.message.reply_video(video=file_id, **send_args)
                 elif msg_type == 'document':
-                    await update.message.reply_document(document=file_id, caption=caption, parse_mode="HTML")
+                    await update.message.reply_document(document=file_id, **send_args)
                 elif msg_type == 'audio':
-                    await update.message.reply_audio(audio=file_id, caption=caption, parse_mode="HTML")
+                    await update.message.reply_audio(audio=file_id, **send_args)
                 elif msg_type == 'voice':
-                    await update.message.reply_voice(voice=file_id, caption=caption, parse_mode="HTML")
+                    await update.message.reply_voice(voice=file_id, **send_args)
+                    
         except Exception as e:
             logging.error(f"Error sending content: {e}")
             
@@ -1259,7 +1282,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_report_page(context, "root")
     
     await update.message.reply_text(
-        """🕊 به ربات دانشگاه خوش آمدید. (V_4.5.19)
+        """🕊 به ربات دانشگاه خوش آمدید. (V_4.6.1)
     
     🔍 برای یافتن فایل مورد نظر، میتوانید به صورت متنی سرچ کنید.
            مثل: وویس جلسه اول باکتری شناسی بهمن 403، جزوه فیزیولوژی کلیه و...
@@ -3348,24 +3371,64 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # پردازش فایل دریافتی
     content_data = None
     
+    # استخراج متن/کپشن خام همراه با آرایه قالب‌بندی‌ها (entities)
+    raw_text = msg.text
+    raw_caption = msg.caption
+    
+    msg_entities = [e.to_dict() for e in msg.entities] if msg.entities else None
+    msg_caption_entities = [e.to_dict() for e in msg.caption_entities] if msg.caption_entities else None
+    
     if msg.photo:
-        content_data = {'type': 'photo', 'file_id': msg.photo[-1].file_id, 'caption': msg.caption_html or msg.caption, "format": "HTML"}
+        content_data = {
+            'type': 'photo', 
+            'file_id': msg.photo[-1].file_id, 
+            'caption': raw_caption, 
+            'entities': msg_caption_entities
+        }
     elif msg.video:
-        content_data = {'type': 'video', 'file_id': msg.video.file_id, 'caption': msg.caption_html or msg.caption, "format": "HTML"}
+        content_data = {
+            'type': 'video', 
+            'file_id': msg.video.file_id, 
+            'caption': raw_caption, 
+            'entities': msg_caption_entities
+        }
     elif msg.document:
-        content_data = {'type': 'document', 'file_id': msg.document.file_id, 'caption': msg.caption_html or msg.caption, "format": "HTML"}
+        content_data = {
+            'type': 'document', 
+            'file_id': msg.document.file_id, 
+            'caption': raw_caption, 
+            'entities': msg_caption_entities
+        }
     elif msg.audio:
-        content_data = {'type': 'audio', 'file_id': msg.audio.file_id, 'caption': msg.caption_html or msg.caption, "format": "HTML"}
+        content_data = {
+            'type': 'audio', 
+            'file_id': msg.audio.file_id, 
+            'caption': raw_caption, 
+            'entities': msg_caption_entities
+        }
     elif msg.voice:
-        content_data = {'type': 'voice', 'file_id': msg.voice.file_id, 'caption': msg.caption_html or msg.caption, "format": "HTML"}
+        content_data = {
+            'type': 'voice', 
+            'file_id': msg.voice.file_id, 
+            'caption': raw_caption, 
+            'entities': msg_caption_entities
+        }
     elif msg.text and not msg.text.startswith('/'):
-        content_data = {'type': 'text', 'text': msg.text_html, "format": "HTML"}
+        content_data = {
+            'type': 'text', 
+            'text': raw_text, 
+            'entities': msg_entities
+        }
 
     if content_data:
+        # اطمینان از مقداردهی اولیه لیست موقت در session کاربر
+        if 'temp_content' not in context.user_data:
+            context.user_data['temp_content'] = []
+            
         context.user_data['temp_content'].append(content_data)
         # یک ری اکشن یا پیام کوتاه برای اطمینان کاربر
         try:
-            await update.message.set_reaction("👍") # فقط در نسخه های جدید تلگرام کار میکنه
+            await update.message.set_reaction("👍")
         except:
             pass
     
