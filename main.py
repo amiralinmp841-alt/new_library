@@ -1790,19 +1790,19 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🆔 <b>کد اختصاصی فایل از صفحه {page_name}:</b>\n\n"
             f"📥 متن دریافت مستقیم:\n"
             f"<code>file-id:{file_id}</code>\n\n"
-            f"🔑 شنا فایل:\n"
+            f"🔑 شناسه فایل:\n"
             f"<code>{file_id}</code>"
         )
     else:
-        parts = [f"🆔 <bکد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n"]
+        parts = [f"🆔 <b>کد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n"]
         for i, item in enumerate(valid_items, start=1):
             escaped_file_id = html.escape(item["file_id"])
             parts.append(
-                f"📎 <b>فایل {i} ({html.escap(item['type'])}):</b>\n"
+                f"📎 <b>فایل {i} ({html.escape(item['type'])}):</b>\n"
                 f"📥 متن دریافت مستقیم:\n"
-                f"<code>fil-id:{escaped_file_id}</code>\n"
+                f"<code>file-id:{escaped_file_id}</code>\n"
                 f"🔑 شناسه فایل:\n"
-                f"<code>{escaped_file_id}<code>"
+                f"<code>{escaped_file_id}</code>"
             )
 
         if text_count > 0:
@@ -1815,6 +1815,7 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await msg.reply_text(text_msg, parse_mode="HTML")
     return CHOOSING
+
 
 
 
