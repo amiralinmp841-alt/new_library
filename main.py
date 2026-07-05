@@ -313,49 +313,8 @@ def save_db(data, context=None):
         print("❌ Failed to save DB locally:", e)
         return False
 
-    caption = None
-    if context:
-        caption = pop_pending_caption(context)
-
-    # اگر لاگ وجود نداشت، دیتابیس را به صورت عادی بفرست
-    if not caption:
-        return upload_db_to_telegram(caption="database.json")
-
-    # تقسیم لاگ در صورت وجود
-    # محاسبه طول هدر برای احتساب در سقف تلگرام (4096 کاراکتر)
-    # جهت امنیت بیشتر سقف مجاز را ۳۴۰۰ کاراکتر در نظر می‌گیریم
-    chunks = split_html_message_by_lines(caption, max_len=3400)
-    
-    if not chunks:
-        return upload_db_to_telegram(caption="database.json")
-        
-    total_parts = len(chunks)
-
-    # اگر فقط ۱ بخش بود، مستقیم آن را کپشن فایل زیپ دیتابیس قرار بده
-    if total_parts == 1:
-        return upload_db_to_telegram(caption=chunks[0])
-
-    # اگر چند بخش بود، تمام بخش‌ها بجز بخش آخر را به صورت پیامی ارسال کن
-    # بخش آخر را به عنوان کپشن فایل دیتابیس ارسال می‌کنیم تا حتما فایل همراه لاگ آپلود شود.
-    for i in range(total_parts - 1):
-        chunk_text = chunks[i]
-        # اضافه کردن عنوان ادامه لاگ در صورتی که ساختار هدر قبلاً اعمال شده باشد
-        # (فرمت کلی کپشن توسط format_admin_log ایجاد می‌شود که هدر را دارد)
-        try:
-            # ارسال پیام متنی موقت از طریق ریکوئست های مستقیم یا کلاینت
-            run_telethon(
-                telethon_client.send_message(
-                    entity=DB_BACKUP_CHAT_ID,
-                    message=chunk_text,
-                    parse_mode="HTML"
-                )
-            )
-        except Exception as e:
-            print(f"❌ Error sending log chunk {i+1}: {e}")
-
-    # ارسال پارت نهایی به همراه فایل دیتابیس
-    last_chunk = chunks[-1]
-    return upload_db_to_telegram(caption=last_chunk)
+    # فقط آپلود فایل. لاگ‌ها به صورت جداگانه با تابع بالا ارسال می‌شوند
+    return upload_db_to_telegram(caption="database.json")
 
 
 # ============ USERDATA BACKUP WITH TELEGRAM ============
@@ -625,6 +584,49 @@ def set_pending_caption(context, caption):
 def pop_pending_caption(context):
     return context.user_data.pop("pending_caption", None)
 
+async def send_split_admin_log(context, admin_user, description):
+    # لاگ‌ها مستقیماً به گروه بک‌آپ می‌روند
+    chat_id = DB_BACKUP_CHAT_ID
+    
+    admin_link = get_admin_link(admin_user)
+    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
+    
+    header = (
+        f"👑 <b>گزارش تغییرات دیتابیس</b>\n"
+        f"👤 ادمین: {admin_link} | 🆔: <code>{admin_user.id}</code>\n"
+        f"👤 یوزرنیم: {username}\n"
+        f"--------------------------\n"
+    )
+
+    # تقسیم بر اساس خطوط برای حفظ ساختار HTML
+    lines = description.split('\n')
+    chunks = []
+    current_chunk = ""
+    max_chunk_size = 3000
+
+    for line in lines:
+        if len(current_chunk) + len(line) + 1 > max_chunk_size:
+            chunks.append(current_chunk)
+            current_chunk = line + "\n"
+        else:
+            current_chunk += line + "\n"
+    
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    total_pages = len(chunks)
+
+    for i, chunk in enumerate(chunks, 1):
+        text = f"{header}{chunk}\n\n<i>ادامه لاگ.. صفحه {i} از {total_pages}</i>"
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            print(f"❌ Error sending split log: {e}")
+
 #------ دکمه های رنگی ----------
 async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -696,10 +698,8 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"از «{old_color_name}» به «{new_color_name}» تغییر کرد."
     )
 
-    caption = format_admin_log(update.effective_user, desc)
-    set_pending_caption(context, caption)
-
     save_db(db, context=context)
+    await send_split_admin_log(context, update.effective_user, desc)
 
     parent_id = db[current_node_id].get("parent", "root")
     context.user_data["current_node"] = parent_id
@@ -1485,78 +1485,30 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # ==========================================
 # ۱) تابع کمکی اصلاح شده برای تولید ساختار لاگ ادمین
 # ==========================================
-# تابع کمکی تقسیم هوشمندانه لاگ‌های طولانی بر اساس خطوط بدون شکستن تگ‌ها
-def split_html_message_by_lines(text: str, max_len: int = 3400) -> list:
-    if not text:
-        return []
-    lines = text.split("\n")
-    chunks = []
-    current_chunk = []
-    current_length = 0
-    
-    for line in lines:
-        line_len = len(line) + 1
-        if current_length + line_len > max_len:
-            if current_chunk:
-                chunks.append("\n".join(current_chunk))
-            current_chunk = [line]
-            current_length = line_len
-        else:
-            current_chunk.append(line)
-            current_length += line_len
-            
-    if current_chunk:
-        chunks.append("\n".join(current_chunk))
-    return chunks
-
-# تابع کمکی استخراج جزئیات دقیق فایل‌ها و متون برای بخش لاگ
 def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     msg_type = item.get("type", "text")
+    
     if msg_type == "text":
         text_content = item.get("text", "")
         text_escaped = escape(text_content)
-        preview = text_escaped[:200] + "..." if len(text_escaped) > 200 else text_escaped
-        return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{preview}</blockquote>"
+        return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{text_escaped}</blockquote>"
     
     file_id = item.get("file_id", "")
     caption = item.get("caption", "")
-    caption_escaped = escape(caption) if caption else "بدون کپشن"
+    caption_escaped = escape(caption) if caption else ""
     
-    return (
-        f"📎 <b>فایل {index} ({msg_type}):</b>\n"
-        f"📥 متن دریافت مستقیم:\n<code>file-id:{file_id}</code>\n"
-        f"🔑 شناسه فایل:\n<code>{file_id}</code>\n"
-        f"✍️ کپشن: <blockquote>{caption_escaped}</blockquote>"
-    )
-
-def format_admin_log(admin_user, description):
-    admin_link = get_admin_link(admin_user)
-    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
+    get_text = f"<code>file-id:{file_id}</code>"
     
-    header = (
-        f"👑 <b>گزارش تغییرات دیتابیس</b>\n\n"
-        f"👤 ادمین: {admin_link}\n"
-        f"🆔 ID: <code>{admin_user.id}</code>\n"
-        f"👤 Username: {username}\n"
-        f"--------------------------\n"
+    log_text = (
+        f"📎 <b>فایل {index} ({msg_type})</b>\n"
+        f"📥 متن دریافت مستقیم:\n{get_text}\n"
+        f"🔑 شناسه خام فایل:\n<code>{file_id}</code>\n"
     )
     
-    # اگر متن بزرگ بود، آن را از همین جا خرد کرده و هدر را به ابتدای تک‌تک بخش‌ها می‌چسبانیم
-    # با این کار خروجی نهایی متد format_admin_log متنی خواهد بود که پارت‌بندی شده و هدرها در آن توزیع شده‌اند.
-    max_chunk_len = 3400 - len(header) - 100
-    chunks = split_html_message_by_lines(description, max_len=max_chunk_len)
+    if caption_escaped:
+        log_text += f"کپشن:\n<blockquote>{caption_escaped}</blockquote>"
     
-    if not chunks:
-        return header + description
-        
-    formatted_parts = []
-    total = len(chunks)
-    for i, chunk in enumerate(chunks, 1):
-        prefix = f"📄 <b>ادامه لاگ (بخش {i} از {total})</b>\n\n" if total > 1 else ""
-        formatted_parts.append(f"{header}{prefix}{chunk}")
-        
-    # بخش‌ها را با یک جداکننده خاص به هم می‌چسبانیم تا در save_db بتوانیم مجددا آن‌ها را تفکیک کنیم
-    return "\n===LOG_PART_SEPARATOR===\n".join(formatted_parts)
+    return log_text
 
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1719,10 +1671,8 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
         desc = f"🗑 <b>حذف شدن فایل ها (تک مورد) از پوشه {node_link}:</b>\n\n" + get_item_log_details(removed_item, 1, bot_username)
         removed_count = 1
 
-    caption = format_admin_log(update.effective_user, desc)
-    set_pending_caption(context, caption)
-
     save_db(db, context=context)
+    await send_split_admin_log(context, update.effective_user, desc)
 
     # پاک‌کردن مپینگ این نود به دلیل تغییر ایندکس‌ها
     context.user_data["sent_mapping"] = {
@@ -3493,10 +3443,9 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parent_link = get_link(current_node_id, parent_name, bot_username)
                 child_link = get_link(target_id, target_name, bot_username)
                 desc = f"❌ پوشه {child_link} از {parent_link} حذف شد."
-                caption = format_admin_log(update.effective_user, desc)
-                set_pending_caption(context, caption)
                 
                 save_db(db, context=context)
+                await send_split_admin_log(context, update.effective_user, desc)
                 await update.message.reply_text(
                     f"دکمه '{target_name}' و تمام زیرمجموعه‌هایش حذف شد.",
                     reply_markup=get_keyboard(current_node_id, is_admin)
@@ -3552,45 +3501,18 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return WAITING_RENAME_BUTTON
 
         if text == "🧹 حذف محتوای صفحه":
-            # ۱. گرفتن نسخه کپی از محتویات قبل از حذف (Snapshot)
-            removed_items = list(db[current_node_id].get("contents", []))
-            
-            if not removed_items:
-                await update.message.reply_text("⚠️ این پوشه فاقد هرگونه محتوا است.")
-                return CHOOSING
-
-            # ۲. پوش کردن در تاریخچه و حذف محتوا از دیتابیس
             push_admin_history(context, db)
             db[current_node_id]["contents"] = []
 
             bot_username = context.bot.username
             node_name = db[current_node_id]["name"]
             node_link = get_link(current_node_id, node_name, bot_username)
-            path_html = get_node_path_html(db, current_node_id, bot_username)
-
-            # ۳. آماده‌سازی بدنه لاگ تفصیلی
-            desc_parts = [
-                f"🧹 <b>کل محتویات پوشه حذف شد</b>\n",
-                f"📁 <b>پوشه مقصد:</b> {node_link}",
-                f"🗂 <b>مسیر کامل:</b> {path_html}",
-                f"📊 <b>تعداد کل موارد حذف شده:</b> {len(removed_items)} مورد",
-                "───────────────────\n<b>📋 جزئیات موارد حذف شده:</b>"
-            ]
-
-            for i, item in enumerate(removed_items, 1):
-                desc_parts.append(get_item_log_details(item, i, bot_username))
-
-            desc = "\n\n".join(desc_parts)
-
-            # ۴. قالب‌بندی با هدر ادمین و ست کردن برای save_db
-            caption = format_admin_log(update.effective_user, desc)
-            set_pending_caption(context, caption)
+            desc = f"🧹 محتوای پوشه {node_link} حذف شد."
             
-            # ذخیره دیتابیس و اجرای پروسه ارسال لاگ تکه‌تکه شده به همراه فایل بکاپ
             save_db(db, context=context)
-
+            await send_split_admin_log(context, update.effective_user, desc)
             await update.message.reply_text(
-                "🧹 محتوای این صفحه حذف شد و گزارش تفصیلی آن برای کانال مدیریت ارسال گردید.",
+                "🧹 محتوای این صفحه حذف شد.",
                 reply_markup=get_keyboard(current_node_id, True)
             )
             return CHOOSING
@@ -3687,10 +3609,9 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 node_name = db[current_node_id]["name"]
                 node_link = get_link(current_node_id, node_name, bot_username)
                 desc = f"🔀 چیدمان دکمه‌های پوشه {node_link} تغییر کرد."
-                caption = format_admin_log(update.effective_user, desc)
-                set_pending_caption(context, caption)
                 
                 save_db(db, context=context)
+                await send_split_admin_log(context, update.effective_user, desc)
         
                 for key in ["reorder_remaining", "reorder_result", "reorder_mode"]:
                     context.user_data.pop(key, None)
@@ -3723,10 +3644,9 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             node_link = get_link(valid_node, node_name, bot_username)
         
             desc = f"↩️ آخرین تغییر بازگردانده شد. پوشه فعلی: {node_link}"
-            caption = format_admin_log(update.effective_user, desc)
-            set_pending_caption(context, caption)
         
             save_db(last_db, context=context)
+            await send_split_admin_log(context, update.effective_user, desc)
         
             await update.message.reply_text(
                 f"↩️ آخرین تغییر بازگردانده شد.\n"
@@ -3765,10 +3685,10 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             node_name = next_db.get(valid_node, {}).get("name", "خانه")
             node_link = get_link(valid_node, node_name, bot_username)
             desc = f"↪️ تغییر دوباره اعمال شد. پوشه فعلی: {node_link}"
-            caption = format_admin_log(update.effective_user, desc)
-            set_pending_caption(context, caption)
 
             save_db(next_db, context=context)
+            await send_split_admin_log(context, update.effective_user, desc)
+
             
             await update.message.reply_text(
                 f"↪️ تغییر دوباره اعمال شد.\n"
@@ -3852,10 +3772,9 @@ async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         old_link = get_link(target_id, old_name, bot_username)
         new_link = get_link(target_id, new_name, bot_username)
         desc = f"📝 نام پوشه {old_link} به {new_link} تغییر کرد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption)
 
         save_db(db, context=context)
+        await send_split_admin_log(context, update.effective_user, desc)
 
     current = context.user_data.get("current_node", "root")
     await update.message.reply_text("✅ نام دکمه ویرایش شد.", reply_markup=get_keyboard(current, True))
@@ -4299,11 +4218,10 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         copied_node_link = get_link(new_root_id, copied_node_name, bot_username)
         
         desc = f"📋 پوشه {copied_node_link} (کپی‌شده از روی هش) به {parent_link} اضافه شد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption)
         
         # ذخیره دیتابیس با اعمال کپشن
         save_db(db, context=context)
+        await send_split_admin_log(context, update.effective_user, desc)
 
         # افزایش آمار دکمه‌های ادمین
         userdata = load_userdata()
@@ -4339,11 +4257,10 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     child_link = get_link(new_id, child_name, bot_username)
     
     desc = f"➕ پوشه جدید {child_link} به {parent_link} اضافه شد."
-    caption = format_admin_log(update.effective_user, desc)
-    set_pending_caption(context, caption)
 
     # ذخیره دیتابیس با اعمال کپشن
     save_db(db, context=context)
+    await send_split_admin_log(context, update.effective_user, desc)
 
     # افزایش آمار دکمه‌های ادمین
     userdata = load_userdata()
@@ -4556,10 +4473,9 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # ساخت و تنظیم لاگ نهایی ادمین
         desc = "\n\n".join(log_desc_parts)
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption)
 
         save_db(db, context=context)
+        await send_split_admin_log(context, update.effective_user, desc)
         context.user_data.pop("temp_content", None)
 
         await msg.reply_text(
@@ -4734,8 +4650,8 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # ۱. آماده‌سازی کپشن لاگ‌گیری در ابتدا
         desc = "📥 بکاپ جدید (ریستور دیتابیس) وارد شد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption) # ذخیره در کانتکست جهت همگام‌سازی
+        await send_split_admin_log(context, update.effective_user, desc)
+
 
         # ============================
         # CASE 1: فایل JSON مستقیم
