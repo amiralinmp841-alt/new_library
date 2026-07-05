@@ -1649,84 +1649,172 @@ async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TY
     raise ApplicationHandlerStop
 
 async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
+    track_user_activity(update, count_message=False)
 
-    if not message.reply_to_message:
-        await message.reply_text(
-            "❌ روی پیام فایل ریپلای کنید و بعد /file_id را بفرستید."
+    user_id = update.effective_user.id
+    if is_user_banned(user_id):
+        await update.message.reply_text("⛔️ شما بن شده‌اید.")
+        return CHOOSING
+
+    msg = update.message
+
+    if not msg.reply_to_message:
+        await msg.reply_text(
+            "⚠️ لطفاً این دستور را روی یکی از پیام‌های ارسال‌شده توسط ربات ریپلای کنید."
         )
         return CHOOSING
 
-    replied = message.reply_to_message
+    replied_msg_id = msg.reply_to_message.message_id
     sent_mapping = context.user_data.get("sent_mapping", {})
-    db = context.user_data.get("db") or load_db()
+    target = sent_mapping.get(replied_msg_id)
 
-    target_mappings = []
+    if not target:
+        await msg.reply_text(
+            "❌ این پیام قابل شناسایی نیست.\n"
+            "فقط فایل‌های آخرین پوشه‌ای که ربات برای شما ارسال کرده قابل تشخیص هستند."
+        )
+        return CHOOSING
 
-    if replied.media_group_id:
-        for msg_id, mapping in sent_mapping.items():
-            if mapping.get("media_group_id") == replied.media_group_id:
-                target_mappings.append((msg_id, mapping))
+    node_id = target.get("node_id")
+    content_index = target.get("content_index")
 
-        target_mappings.sort(key=lambda x: x[0])
+    if node_id is None or content_index is None:
+        await msg.reply_text("❌ اطلاعات این پیام ناقص است و قابل بررسی نیست.")
+        return CHOOSING
+
+    current_node = context.user_data.get("current_node", "root")
+    if node_id != current_node:
+        await msg.reply_text(
+            "❌ فقط فایل‌های مربوط به پوشه فعلی قابل شناسایی هستند."
+        )
+        return CHOOSING
+
+    db = load_db()
+
+    if node_id not in db or "contents" not in db[node_id]:
+        await msg.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+        return CHOOSING
+
+    contents = db[node_id].get("contents", [])
+
+    try:
+        idx = int(content_index)
+    except (TypeError, ValueError):
+        await msg.reply_text("❌ اطلاعات این پیام نامعتبر است.")
+        return CHOOSING
+
+    if not (0 <= idx < len(contents)):
+        await msg.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+        return CHOOSING
+
+    target_item = contents[idx]
+    msg_type = target_item.get("type", "text")
+
+    # اگر پیام متنی باشد
+    if msg_type == "text":
+        await msg.reply_text(
+            "📝 این پیام متنی است و از طرف تلگرام file_id ندارد."
+        )
+        return CHOOSING
+
+    media_group_id = target_item.get("media_group_id")
+    groupable_types = {"photo", "video", "document", "audio"}
+
+    matched_items = []
+
+    # اگر عضو آلبوم/گروه رسانه‌ای باشد، مثل handle_reply_delete کل گروه را پیدا کن
+    if media_group_id and msg_type in groupable_types:
+        start = idx
+        while start > 0:
+            prev_item = contents[start - 1]
+            if (
+                prev_item.get("media_group_id") == media_group_id
+                and prev_item.get("type") in groupable_types
+            ):
+                start -= 1
+            else:
+                break
+
+        end = idx
+        while end + 1 < len(contents):
+            next_item = contents[end + 1]
+            if (
+                next_item.get("media_group_id") == media_group_id
+                and next_item.get("type") in groupable_types
+            ):
+                end += 1
+            else:
+                break
+
+        matched_items = contents[start:end + 1]
     else:
-        mapping = sent_mapping.get(replied.message_id)
-        if mapping:
-            target_mappings.append((replied.message_id, mapping))
+        matched_items = [target_item]
 
-    if not target_mappings:
-        await message.reply_text(
-            "❌ این پیام قابل شناسایی نیست.\n\n"
-            "فقط فایل‌های آخرین پوشه‌ای که توسط ربات ارسال شده‌اند قابل شناسایی هستند."
-        )
+    valid_items = []
+    text_count = 0
+    no_id_count = 0
+
+    for item in matched_items:
+        item_type = item.get("type", "text")
+
+        if item_type == "text":
+            text_count += 1
+            continue
+
+        file_id = (item.get("file_id") or "").strip()
+        if not file_i:
+            no_id_count += 1
+            continue
+
+        valid_items.append({
+            "type": item_type,
+            "file_id": file_id,
+        })
+
+    if not valid_items:
+        if len(matched_items) > 1:
+            await msg.reply_text(
+                "❌ در این گروه فایل، هیچ شناسه فایل معتبری پیدا نشد."
+            )
+        else:
+            await msg.reply_text(
+                "❌ شناسه فایل در دیتابیس پیدا نشد."
+            )
         return CHOOSING
 
-    lines = []
-    file_count = 0
+    page_name = html.escape(db[node_id].get("name", "بدون نام"))
 
-    for _, mapping in target_mappings:
-        node_id = mapping.get("node_id")
-        content_index = mapping.get("content_index")
-
-        if node_id is None or content_index is None:
-            continue
-
-        node = db.get(node_id)
-        if not node:
-            continue
-
-        contents = node.get("contents", [])
-        try:
-            content = contents[int(content_index)]
-        except (ValueError, TypeError, IndexError):
-            continue
-
-        if content.get("type") == "text":
-            continue
-
-        file_id = content.get("file_id")
-        if not file_id:
-            continue
-
-        file_count += 1
-        lines.append(
-            f"📎 <b>فایل {file_count}:</b>\n"
-            f"📥 <code>file-id:{html.escape(file_id)}</code>\n"
-            f"🔑 <code>{html.escape(file_id)}</code>"
+    if len(valid_items) == 1:
+        file_id = html.escape(valid_items[0]["file_id"])
+        text_msg = (
+            f"🆔 <b>کد اختصاصی فایل از صفحه {page_name}:</b>\n\n"
+            f📥 متن دریافت مستقیم:\n"
+            f"<code>file-id:{file_id}</code>\n\n"
+            f"🔑 شنا فایل:\n"
+            f"<code>{file_id}</code>"
         )
+    else:
+        parts = [f"🆔 <bکد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n"]
+        for i, item in enumerate(valid_items, start=1):
+            escaped_file_id = html.escape(item["file_id"])
+            parts.append(
+                f"📎 <b>فایل {i} ({html.escap(item['type'])}):</b>\n"
+                f"📥 متن دریافت مستقیم:\n"
+                f"<code>fil-id:{escaped_file_id}</code>\n"
+                f"🔑 شناسه فایل:\n"
+                f"<code>{escaped_file_id}<code>"
+            )
 
-    if not lines:
-        await message.reply_text(
-            "❌ در این پیام یا گروه، فایل قابل استفاده‌ای پیدا نشد."
-        )
-        return CHOOSING
+        if text_count > 0:
+            parts.append(f"📝 {text_count} پیام متنی در این گروه بود که file_i ندارد.")
 
-    await message.reply_text(
-        "✅ شناسه فایل(ها):\n\n" + "\n\n".join(lines),
-        parse_mode="HTML",
-    )
+        if no_id_count > 0:
+            parts.append(f"⚠️ برای {no_id_count} مورد شناسه فایل ذخیره نشده بود.")
+
+        text_msg = "\n\n".join(parts)
+
+    await msg.reply_text(text_msg, parse_mode="HTML")
     return CHOOSING
-
 
 
 
