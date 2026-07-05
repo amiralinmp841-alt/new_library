@@ -815,10 +815,18 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(reaction.chat.id, "🗑 حذف شد.", reply_to_message_id=msg_id)
 
 async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    clear_all_favorites(update.effective_user.id)
-    await update.message.reply_text("✅ پوشه دلخواه پاکسازی شد.", 
-                                    reply_markup=get_keyboard("root", False, user_id=update.effective_user.id))
+    user_id = update.effective_user.id
+    userdata = load_userdata()
+    is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
+
+    clear_all_favorites(user_id)
+
+    await update.message.reply_text(
+        "✅ پوشه دلخواه پاکسازی شد.",
+        reply_markup=get_keyboard("root", is_admin, user_id=user_id)
+    )
     return CHOOSING
+
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
@@ -860,7 +868,6 @@ def get_keyboard(node_id, is_admin, user_id=None):
         favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
         if favorites:
             keyboard.insert(0, [KeyboardButton("📁 پوشه دلخواه")])
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     # --- دکمه‌های کنترلی ادمین ---
     if is_admin:
