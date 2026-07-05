@@ -777,42 +777,18 @@ def clear_all_favorites(user_id):
 from telegram.ext import MessageReactionHandler
 from telegram import MessageReactionUpdated
 
+import json
+from telegram import Update
+from telegram.ext import ContextTypes
+
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    reaction = update.message_reaction
-    user_id = reaction.user.id
-    msg_id = reaction.message_id
-    
-    # چک کردن اینکه این پیام در نقشه ما هست یا نه
-    sent_mapping = context.user_data.get("sent_mapping", {})
-    meta = sent_mapping.get(msg_id)
-    
-    if not meta:
-        return
+    try:
+        print("REACTION UPDATE:", update.to_dict())
+    except Exception as e:
+        print("to_dict failed:", e)
 
-    node_id = meta["node_id"]
-    idx = meta["content_index"]
-    
-    # بررسی تغییرات ری‌اکشن
-    new_emojis = [r.emoji for r in reaction.new_reaction]
-    old_emojis = [r.emoji for r in reaction.old_reaction]
+    # اگر این پرینت را در لاگ‌ها نبینی یعنی اصلاً آپدیت message_reaction به برنامه نمی‌رسد
 
-    # اگر قلب اضافه شد
-    if "❤️" in new_emojis and "❤️" not in old_emojis:
-        if add_to_favorites(user_id, node_id, idx):
-            await context.bot.send_message(reaction.chat.id, "✅ به پوشه دلخواه اضافه شد.", 
-                                           reply_to_message_id=msg_id)
-            
-    # اگر قلب برداشته شد
-    if "❤️" in old_emojis and "❤️" not in new_emojis:
-        if remove_from_favorites(user_id, node_id, idx):
-            await context.bot.send_message(reaction.chat.id, "🗑 از پوشه دلخواه حذف شد.", 
-                                           reply_to_message_id=msg_id)
-                                           
-    # اگر انگشت اشاره پایین (👎) اضافه شد (برای پاک کردن در صفحه Favorites)
-    if "👎" in new_emojis and "👎" not in old_emojis:
-        # چک کنیم آیا کاربر در صفحه Favorites است؟ (می‌تونی با یک flag در user_data بفهمی)
-        if remove_from_favorites(user_id, node_id, idx):
-            await context.bot.send_message(reaction.chat.id, "🗑 حذف شد.", reply_to_message_id=msg_id)
 
 async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
