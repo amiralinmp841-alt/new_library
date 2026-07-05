@@ -1448,7 +1448,42 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
         i += 1
 
-
+# ==========================================
+# ۱) تابع کمکی برای تولید ساختار لاگ ادمین به صورت خوانا و کوت‌کلپس شده
+# ==========================================
+def get_item_log_details(item, index: int) -> str:
+    """
+    برای هر آیتم (فایل یا متن) یک متن قالب‌بندی شده برای لاگ‌های ادمین با تگ <blockquote> می‌سازد.
+    لینک فایل روی نام آن تنظیم می‌شود.
+    """
+    msg_type = item.get("type", "text")
+    
+    # اگر آیتم صرفاً پیام متنی باشد
+    if msg_type == "text":
+        text_content = item.get("text", "")
+        # فرار دادن کاراکترهای خاص HTML برای جلوگیری از بهم ریختگی تگ‌ها
+        text_escaped = escape(text_content)
+        return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{text_escaped}</blockquote>"
+    
+    # اگر آیتم یکی از انواع فایل‌های رسانه‌ای باشد
+    file_id = item.get("file_id", "")
+    caption = item.get("caption", "")
+    caption_escaped = escape(caption) if caption else ""
+    
+    # لینک‌دار کردن نام فایل با ایجاد یک لینک اشتراک‌گذاری حاوی file_id جهت کپی/کلیک راحت ادمین
+    file_link = f'<a href="https://t.me/share/url?url={file_id}">فایل {index} ({msg_type})</a>'
+    
+    log_text = f"📎 {file_link}\n"
+    if caption_escaped:
+        log_text += f"کپشن فایل {index}:\n<blockquote>{caption_escaped}</blockquote>"
+    else:
+        log_text += f"کپشن فایل {index}: <i>(بدون کپشن)</i>"
+        
+    return log_text
+    
+# ==========================================
+# ۳) اصلاح تابع handle_reply_delete (حذف با لاگ جزئیات فایل/کپشن‌ها)
+# ==========================================
 async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     user_id = update.effective_user.id
@@ -1498,7 +1533,7 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
     media_group_id = target_item.get("media_group_id")
     groupable_types = {"photo", "video", "document", "audio"}
 
-    removed_count = 0
+    removed_items = []
 
     if media_group_id and target_item.get("type") in groupable_types:
         start = idx
@@ -1523,21 +1558,29 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
             else:
                 break
 
-        removed_count = end - start + 1
+        removed_items = contents[start:end + 1]
         del contents[start:end + 1]
 
-        desc = f"🗑 یک آلبوم شامل {removed_count} مورد از پوشه {node_link} حذف شد."
+        # ساخت لاگ حذف گروه رسانه‌ای
+        log_desc_parts = [f"🗑 <b>حذف شدن فایل ها (آلبوم) از پوشه {node_link}:</b>\n"]
+        for i, r_item in enumerate(removed_items, start=1):
+            log_desc_parts.append(get_item_log_details(r_item, i))
+        desc = "\n\n".join(log_desc_parts)
+        removed_count = len(removed_items)
     else:
-        contents.pop(idx)
+        removed_item = contents.pop(idx)
+        removed_items.append(removed_item)
+        
+        # ساخت لاگ حذف تک محتوا
+        desc = f"🗑 <b>حذف شدن فایل ها (تک مورد) از پوشه {node_link}:</b>\n\n" + get_item_log_details(removed_item, 1)
         removed_count = 1
-        desc = f"🗑 یک فایل از پوشه {node_link} حذف شد."
 
     caption = format_admin_log(update.effective_user, desc)
     set_pending_caption(context, caption)
 
     save_db(db, context=context)
 
-    # چون ایندکس‌ها جابجا می‌شوند، mapping این نود را کامل پاک می‌کنیم
+    # پاک‌کردن مپینگ این نود به دلیل تغییر ایندکس‌ها
     context.user_data["sent_mapping"] = {
         k: v
         for k, v in context.user_data.get("sent_mapping", {}).items()
@@ -1548,6 +1591,7 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text(f"✅ {removed_count} مورد با موفقیت از دیتابیس این پوشه حذف شد.")
     else:
         await msg.reply_text("✅ فایل با موفقیت از دیتابیس این پوشه حذف شد.")
+
 
 
 async def handle_reply_change(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1630,6 +1674,7 @@ async def handle_reply_change(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     return WAITING_CONTENT
+
 
 def get_subtree_db(db, root_node_id):
     subtree = {}
@@ -1949,72 +1994,208 @@ def save_start_page_contents(contents):
     userdata["start_page_contents"] = contents
     save_userdata(userdata)
 
-async def send_start_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ==========================================
+# ۴) اصلاح بخش آغازین تابع start (اضافه کردن پشتیبانی از دیپ‌لینک مستقیم file_id بدون تغییر پوشه کاربر)
+# ==========================================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_user_activity(update, count_message=True)
     user_id = update.effective_user.id
+    if is_user_banned(user_id):
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از ربات را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return ConversationHandler.END
     userdata = load_userdata()
     sub_admins = userdata.get("sub_admins", [])
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
-    contents = userdata.get("start_page_contents", [])
+    # پاک‌سازی داده‌های موقتی
+    context.user_data.pop("temp_content", None)
+    context.user_data.pop("change_target", None)
+    context.user_data.pop("current_report_node", None)
 
-    if not contents:
-        await update.message.reply_text(
-            DEFAULT_START_TEXT,
-            reply_markup=get_keyboard("root", is_admin),
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
-        return
+    db = load_db()
+    args = context.args  # payload ارسالی استارت
 
-    first_sent = False
+    # 🔗 اگر استارت همراه با آرگومان/دیپ‌لینک باشد
+    if args:
+        payload = args[0]
 
-    for item in contents:
-        try:
-            msg_type = item["type"]
-            saved_entities = item.get("entities")
-
-            if msg_type == "text":
-                kwargs = {"disable_web_page_preview": True}
-                if saved_entities is not None:
-                    kwargs["entities"] = saved_entities
-                    sent = await update.message.reply_text(
-                        text=item["text"],
-                        **kwargs
-                    )
-                else:
-                    kwargs["parse_mode"] = "HTML"
-                    sent = await update.message.reply_text(
-                        text=item["text"],
-                        **kwargs
-                    )
-            else:
-                file_id = item["file_id"]
-                caption = item.get("caption", "")
-                send_args = {"caption": caption}
-
-                if saved_entities is not None:
-                    send_args["caption_entities"] = saved_entities
-                else:
-                    send_args["parse_mode"] = "HTML"
-
-                if msg_type == "photo":
-                    sent = await update.message.reply_photo(photo=file_id, **send_args)
-                elif msg_type == "video":
-                    sent = await update.message.reply_video(video=file_id, **send_args)
-                elif msg_type == "document":
-                    sent = await update.message.reply_document(document=file_id, **send_args)
-                elif msg_type == "audio":
-                    sent = await update.message.reply_audio(audio=file_id, **send_args)
-                elif msg_type == "voice":
-                    sent = await update.message.reply_voice(voice=file_id, **send_args)
-                else:
+        # ----------------- بخش دیپ‌لینک مستقیم جدید بر اساس file_id -----------------
+        # فرمت لینک جدید: t.me/BotUsername?start=file_FILEID
+        if payload.startswith("file_") and not payload.startswith("file__"):
+            file_id = payload[len("file_"):]
+            
+            # فایل را به صورت مستقیم به کاربر ارسال می‌کنیم (صرفاً خود فایل را بدون نمایش مسیر و تغییر پوشه ارسال می‌کند)
+            chat_id = update.effective_chat.id
+            bot = context.bot
+            
+            # نگه داشتن پوشه فعلی کاربر روی وضعیت قبلی یا تنظیم روی ریشه در صورت عدم وجود
+            if "current_node" not in context.user_data:
+                context.user_data["current_node"] = "root"
+            
+            # متدهای مختلف ارسال فایل در تلگرام را برای file_id بررسی و ارسال می‌کنیم
+            methods = [
+                (bot.send_photo, "photo"),
+                (bot.send_video, "video"),
+                (bot.send_document, "document"),
+                (bot.send_audio, "audio"),
+                (bot.send_voice, "voice"),
+            ]
+            
+            sent_status = False
+            for method, arg_name in methods:
+                try:
+                    kwargs = {arg_name: file_id}
+                    await method(chat_id=chat_id, **kwargs)
+                    sent_status = True
+                    break
+                except Exception:
                     continue
+            
+            if not sent_status:
+                await update.message.reply_text("❌ امکان ارسال مستقیم این فایل وجود نداشت یا شناسه منقضی شده است.")
+            
+            return CHOOSING
+        # ----------------------------------------------------------------------------
 
-            if sent and not first_sent:
-                first_sent = True
+        node_id = None
+        content_index = None
 
-        except Exception as e:
-            logging.error(f"Error sending start page content: {e}")
+        # لینک قدیمی: file__{node_id}__{index}
+        if payload.startswith("file__"):
+            parts = payload.split("__", 2)
+            if len(parts) == 3:
+                _, node_id, index_str = parts
+                try:
+                    content_index = int(index_str)
+                except ValueError:
+                    node_id = None
+                    content_index = None
+
+        # لینک کمکی: file_{node_id}_{index}
+        elif payload.startswith("file_"):
+            raw = payload[len("file_"):]
+            try:
+                node_id, index_str = raw.rsplit("_", 1)
+                content_index = int(index_str)
+            except ValueError:
+                node_id = None
+                content_index = None
+
+        if node_id is not None and content_index is not None:
+            if node_id in db:
+                contents = db[node_id].get("contents", [])
+                if 0 <= content_index < len(contents):
+                    bot_username = context.bot.username
+                    path_text = get_node_path_html(db, node_id, bot_username)
+
+                    current_node = context.user_data.get("current_node", "root")
+
+                    await update.message.reply_text(
+                        f"📂 مسیر فایل:\n{path_text}",
+                        reply_markup=get_keyboard(current_node, is_admin),
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
+
+                    item = contents[content_index]
+                    try:
+                        msg_type = item["type"]
+                        saved_entities = item.get("entities")
+
+                        if msg_type == "text":
+                            if saved_entities is not None:
+                                await update.message.reply_text(
+                                    text=item["text"],
+                                    entities=saved_entities
+                                )
+                            else:
+                                await update.message.reply_text(
+                                    text=item["text"],
+                                    parse_mode="HTML"
+                                )
+                        else:
+                            file_id = item["file_id"]
+                            caption = item.get("caption", "")
+
+                            send_args = {"caption": caption}
+                            if saved_entities is not None:
+                                send_args["caption_entities"] = saved_entities
+                            else:
+                                send_args["parse_mode"] = "HTML"
+
+                            if msg_type == "photo":
+                                await update.message.reply_photo(photo=file_id, **send_args)
+                            elif msg_type == "video":
+                                await update.message.reply_video(video=file_id, **send_args)
+                            elif msg_type == "document":
+                                await update.message.reply_document(document=file_id, **send_args)
+                            elif msg_type == "audio":
+                                await update.message.reply_audio(audio=file_id, **send_args)
+                            elif msg_type == "voice":
+                                await update.message.reply_voice(voice=file_id, **send_args)
+
+                    except Exception as e:
+                        logging.error(f"Error sending deeplink file: {e}")
+                        await update.message.reply_text("❌ خطا در ارسال فایل.")
+
+                    if "current_node" not in context.user_data:
+                        context.user_data["current_node"] = "root"
+
+                    return CHOOSING
+
+            await update.message.reply_text("❌ لینک فایل نامعتبر است.")
+            return CHOOSING
+
+    # 🔗 اگر start با هش/پوشه آمده
+    if args:
+        target_id = args[0]
+
+        if target_id in db:
+            set_report_page(context, target_id)
+            target_node = db[target_id]
+            has_children = bool(target_node.get("children"))
+
+            # 👤 کاربر عادی + نود بدون فرزند => فقط محتوا نمایش بده
+            if not is_admin and not has_children:
+                parent_id = target_node.get("parent") or "root"
+                context.user_data["current_node"] = parent_id
+                bot_username = context.bot.username
+                path_text = get_node_path_html(db, target_id, bot_username)
+
+                await update.message.reply_text(
+                    f"📂 مسیر:\n{path_text}",
+                    reply_markup=get_keyboard(parent_id, is_admin),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+
+                await send_node_contents(update, context, target_id)
+                return CHOOSING
+
+            # 👑 ادمین، یا نودی که فرزند دارد => خود پوشه باز شود
+            context.user_data["current_node"] = target_id
+            bot_username = context.bot.username
+            path_text = get_node_path_html(db, target_id, bot_username)
+
+            await update.message.reply_text(
+                f"📂 مسیر:\n{path_text}",
+                reply_markup=get_keyboard(target_id, is_admin),
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+
+            await send_node_contents(update, context, target_id)
+            return CHOOSING
+
+    # 🏠 start عادی
+    context.user_data["current_node"] = "root"
+    set_report_page(context, "root")
+    
+    await send_start_page(update, context)
+    return CHOOSING
 
     #if first_sent:
     #    await update.message.reply_text(
@@ -4215,7 +4396,9 @@ def extract_message_content(msg):
 
     return None
 
-
+# ==========================================
+# ۲) اصلاح تابع receive_content (ثبت و جایگزینی نهایی با جزئیات کامل لاگ)
+# ==========================================
 async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     text = msg.text
@@ -4263,6 +4446,12 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_contents.append(saved_item)
 
         change_target = context.user_data.get("change_target")
+        log_desc_parts = []
+        
+        bot_username = context.bot.username
+        node_name = db[current_node_id]["name"]
+        node_link = get_link(current_node_id, node_name, bot_username)
+
         if change_target:
             target_node = change_target["node_id"]
             idx = change_target["content_index"]
@@ -4274,27 +4463,49 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 and "contents" in db[target_node]
                 and 0 <= idx < len(db[target_node]["contents"])
             ):
+                # گرفتن کپی از موارد قدیمی پیش از حذف برای ثبت در لاگ
+                old_items = db[target_node]["contents"][idx: idx + replace_count]
+                
+                # حذف موارد قبلی دیتابیس
                 del db[target_node]["contents"][idx: idx + replace_count]
 
+                # قراردادن موارد جدید
                 for item in reversed(final_contents):
                     db[target_node]["contents"].insert(idx, item)
 
                 msg_text = f"🔄 {replace_count} مورد قبلی حذف و {len(final_contents)} مورد جدید جایگزین شد."
+                
+                # ساخت لاگ جایگزینی
+                log_desc_parts.append(f"🔄 <b>جایگزینی محتوا در پوشه {node_link}:</b>\n")
+                log_desc_parts.append("<b>❌ موارد حذف شده:</b>")
+                for i, o_item in enumerate(old_items, start=1):
+                    log_desc_parts.append(get_item_log_details(o_item, i))
+                
+                log_desc_parts.append("\n<b>📥 موارد جدید جایگزین شده:</b>")
+                for i, n_item in enumerate(final_contents, start=1):
+                    log_desc_parts.append(get_item_log_details(n_item, i))
             else:
                 db[current_node_id]["contents"].extend(final_contents)
                 msg_text = "⚠️ خطا در تطابق مسیر! فایل‌ها به عنوان محتوای جدید به انتهای پوشه اضافه شدند."
+                
+                log_desc_parts.append(f"📥 <b>افزودن محتوا (به دلیل خطای مسیر جایگزینی) در پوشه {node_link}:</b>")
+                for i, n_item in enumerate(final_contents, start=1):
+                    log_desc_parts.append(get_item_log_details(n_item, i))
 
             context.user_data.pop("change_target", None)
         else:
             db[current_node_id]["contents"].extend(final_contents)
             msg_text = f"{len(final_contents)} مورد ذخیره شد."
+            
+            # ساخت لاگ اضافه شدن محتوای جدید
+            log_desc_parts.append(f"📥 <b>اضافه شدن فایل/محتوای جدید به پوشه {node_link}:</b>\n")
+            for i, n_item in enumerate(final_contents, start=1):
+                log_desc_parts.append(get_item_log_details(n_item, i))
 
         context.user_data.pop("sent_mapping", None)
 
-        bot_username = context.bot.username
-        node_name = db[current_node_id]["name"]
-        node_link = get_link(current_node_id, node_name, bot_username)
-        desc = f"📝 تغییرات محتوا در پوشه {node_link} اعمال شد."
+        # ساخت و تنظیم لاگ نهایی ادمین
+        desc = "\n\n".join(log_desc_parts)
         caption = format_admin_log(update.effective_user, desc)
         set_pending_caption(context, caption)
 
