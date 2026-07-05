@@ -1564,69 +1564,120 @@ def pop_pending_backup_caption(context):
 
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    هندلر دریافت مستقیم فایل با متن ساده:
-    file-id:FILE_ID
-    """
+    track_user_activity(update, count_message=True)
+    user_id = update.effective_user.id
 
-    if not update.message or not update.message.text:
+    if is_user_banned(user_id):
+        await update.message.reply_text("⛔️ شما بن شده‌اید.")
         return
 
     text = update.message.text.strip()
-
-    logging.info(f"[direct_getfile] received text: {text[:80]}")
-
-    if not text.startswith("file-id:"):
+    # استخراج بخش بعد از file-id:
+    parts = text.split(":", 1)
+    if len(parts) < 2:
+        await update.message.reply_text("⚠️ فرمت وارد شده صحیح نیست.")
         return
 
-    file_id = text[len("file-id:"):].strip()
+    raw_id = parts[1].strip()
+    id_parts = raw_id.split("_")
+    if len(id_parts) < 2:
+        await update.message.reply_text("⚠️ شناسه فایل نامعتبر است.")
+        return
 
-    if not file_id:
-        await update.message.reply_text("❌ شناسه فایل خالی است.")
-        raise ApplicationHandlerStop
+    node_id = id_parts[0]
+    try:
+        content_index = int(id_parts[1])
+    except ValueError:
+        await update.message.reply_text("⚠️ شناسه فایل نامعتبر است.")
+        return
 
-    chat_id = update.effective_chat.id
-    bot = context.bot
+    db = load_db()
+    if node_id not in db or "contents" not in db[node_id]:
+        await update.message.reply_text("❌ فایل مورد نظر در دیتابیس ربات یافت نشد.")
+        return
 
-    logging.info(f"[direct_getfile] extracted file_id: {file_id}")
+    contents = db[node_id]["contents"]
+    if not (0 <= content_index < len(contents)):
+        await update.message.reply_text("❌ این فایل از روی سرور ربات حذف شده است.")
+        return
 
-    methods = [
-        (bot.send_photo, "photo"),
-        (bot.send_video, "video"),
-        (bot.send_document, "document"),
-        (bot.send_audio, "audio"),
-        (bot.send_voice, "voice"),
-        (bot.send_animation, "animation"),
-    ]
+    item = contents[content_index]
+    
+    # ارسال فایل بر اساس نوع ذخیره شده آن در دیتابیس
+    try:
+        # برای ردیابی پیام ارسالی در حافظه موقت (برای ریپلای‌های بعدی)
+        sent_msg = None
+        
+        if item["type"] == "text":
+            sent_msg = await update.message.reply_text(item["text"], parse_mode="HTML")
+        elif item["type"] == "photo":
+            sent_msg = await update.message.reply_photo(photo=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
+        elif item["type"] == "document":
+            sent_msg = await update.message.reply_document(document=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
+        elif item["type"] == "audio":
+            sent_msg = await update.message.reply_audio(audio=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
+        elif item["type"] == "video":
+            sent_msg = await update.message.reply_video(video=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
+        elif item["type"] == "voice":
+            sent_msg = await update.message.reply_voice(voice=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
+        else:
+            await update.message.reply_text("⚠️ فرمت فایل ذخیره شده پشتیبانی نمی‌شود.")
+            return
 
-    last_error = None
+        # ذخیره در mapping موقت کاربر جهت استفاده مجدد از قابلیت‌های ریپلای تغییر/حذف/دیپ لینک
+        if sent_msg:
+            if "sent_mapping" not in context.user_data:
+                context.user_data["sent_mapping"] = {}
+            context.user_data["sent_mapping"][sent_msg.message_id] = {
+                "node_id": node_id,
+                "content_index": content_index
+            }
 
-    for method, arg_name in methods:
-        try:
-            kwargs = {arg_name: file_id}
-            await method(chat_id=chat_id, **kwargs)
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطا در ارسال فایل:\n{e}")
 
-            logging.info(f"[direct_getfile] sent successfully as {arg_name}")
+async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_user_activity(update, count_message=False)
 
-            # خیلی مهم: نگذار هندلرهای بعدی هم همین پیام را پردازش کنند
-            raise ApplicationHandlerStop
+    user_id = update.effective_user.id
+    if is_user_banned(user_id):
+        await update.message.reply_text("⛔️ شما بن شده‌اید.")
+        return CHOOSING
 
-        except ApplicationHandlerStop:
-            raise
+    db = load_db()
 
-        except Exception as e:
-            last_error = e
-            logging.warning(f"[direct_getfile] failed as {arg_name}: {e}")
-            continue
+    # حتماً باید روی پیام ربات ریپلای شده باشد
+    if not update.message.reply_to_message:
+        await update.message.reply_text("⚠️ لطفاً این دستور را روی یکی از پیام‌های فایل ارسال شده توسط ربات ریپلای کنید.")
+        return CHOOSING
 
-    logging.error(f"[direct_getfile] all methods failed. last_error={last_error}")
+    replied_msg_id = update.message.reply_to_message.message_id
+    sent_mapping = context.user_data.get("sent_mapping", {})
+    target = sent_mapping.get(replied_msg_id)
 
-    await update.message.reply_text(
-        "❌ خطا: فایل یافت نشد یا شناسه نامعتبر است.\n"
-        "ممکن است این file_id مربوط به نوع فایل دیگری باشد یا برای این بات قابل استفاده نباشد."
-    )
+    if not target:
+        await update.message.reply_text("❌ این پیام فایلِ قابل‌شناسایی از حافظه ربات نیست.")
+        return CHOOSING
 
-    raise ApplicationHandlerStop
+    node_id = target["node_id"]
+    content_index = target["content_index"]
+
+    if node_id in db and 0 <= content_index < len(db[node_id].get("contents", [])):
+        page_name = html.escape(db[node_id].get("name", "بدون نام"))
+        # ساختن شناسه یکتای اختصاصی برای این فایل
+        custom_file_id = f"file-id:{node_id}_{content_index}"
+
+        msg = (
+            f"🆔 <b>کد اختصاصی فایل:</b> <code>{page_name}</code>\n\n"
+            f"با لمس عبارت زیر، آن را کپی کرده و به ربات بفرستید تا مستقیم فایل را دریافت کنید:\n\n"
+            f"<code>{custom_file_id}</code>"
+        )
+        await update.message.reply_text(msg, parse_mode="HTML")
+        return CHOOSING
+
+    await update.message.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+    return CHOOSING
+
 
 
 # ==========================================
@@ -4908,7 +4959,7 @@ def build_application():
                 CommandHandler("report", report_page),
                 CommandHandler("deeplink", deeplink_command),
                 CommandHandler("chat", start_chat_with_admin),
-
+                CommandHandler("file_id", file_id_command), # 👈 اضافه شدن کامند جدید به منو
                 # اینا باید داخل کانورسیشن باشند
                 CommandHandler("change", handle_reply_change),
                 CommandHandler("del", handle_reply_delete),
