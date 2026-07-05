@@ -1649,74 +1649,82 @@ async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TY
     raise ApplicationHandlerStop
 
 async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    message = update.effective_message
 
-    user_id = update.effective_user.id
-    if is_user_banned(user_id):
-        await update.message.reply_text("⛔️ شما بن شده‌اید.")
-        return CHOOSING
-
-    if not update.message.reply_to_message:
-        await update.message.reply_text(
-            "⚠️ لطفاً این دستور را روی یکی از پیام‌های ارسال‌شده توسط ربات ریپلای کنید."
+    if not message.reply_to_message:
+        await message.reply_text(
+            "❌ روی پیام فایل ریپلای کنید و بعد /file_id را بفرستید."
         )
         return CHOOSING
 
-    replied_msg_id = update.message.reply_to_message.message_id
+    replied = message.reply_to_message
     sent_mapping = context.user_data.get("sent_mapping", {})
-    target = sent_mapping.get(replied_msg_id)
+    db = context.user_data.get("db") or load_db()
 
-    # فقط فایل‌های آخرین پوشه که در حافظه این سشن ثبت شده‌اند قابل شناسایی‌اند
-    if not target:
-        await update.message.reply_text(
-            "❌ این پیام قابل شناسایی نیست.\n"
-            "فقط فایل‌های آخرین پوشه‌ای که ربات برای شما ارسال کرده قابل تشخیص هستند."
+    target_mappings = []
+
+    if replied.media_group_id:
+        for msg_id, mapping in sent_mapping.items():
+            if mapping.get("media_group_id") == replied.media_group_id:
+                target_mappings.append((msg_id, mapping))
+
+        target_mappings.sort(key=lambda x: x[0])
+    else:
+        mapping = sent_mapping.get(replied.message_id)
+        if mapping:
+            target_mappings.append((replied.message_id, mapping))
+
+    if not target_mappings:
+        await message.reply_text(
+            "❌ این پیام قابل شناسایی نیست.\n\n"
+            "فقط فایل‌های آخرین پوشه‌ای که توسط ربات ارسال شده‌اند قابل شناسایی هستند."
         )
         return CHOOSING
 
-    node_id = target.get("node_id")
-    content_index = target.get("content_index")
+    lines = []
+    file_count = 0
 
-    if node_id is None or content_index is None:
-        await update.message.reply_text("❌ اطلاعات این پیام ناقص است و قابل بررسی نیست.")
-        return CHOOSING
+    for _, mapping in target_mappings:
+        node_id = mapping.get("node_id")
+        content_index = mapping.get("content_index")
 
-    db = load_db()
+        if node_id is None or content_index is None:
+            continue
 
-    if node_id not in db:
-        await update.message.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
-        return CHOOSING
+        node = db.get(node_id)
+        if not node:
+            continue
 
-    contents = db[node_id].get("contents", [])
-    if not (0 <= content_index < len(contents)):
-        await update.message.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
-        return CHOOSING
+        contents = node.get("contents", [])
+        try:
+            content = contents[int(content_index)]
+        except (ValueError, TypeError, IndexError):
+            continue
 
-    content = contents[content_index]
-    msg_type = content.get("type", "text")
+        if content.get("type") == "text":
+            continue
 
-    if msg_type == "text":
-        await update.message.reply_text(
-            "📝 این پیام متنی است و از طرف تلگرام file_id ندارد."
+        file_id = content.get("file_id")
+        if not file_id:
+            continue
+
+        file_count += 1
+        lines.append(
+            f"📎 <b>فایل {file_count}:</b>\n"
+            f"📥 <code>file-id:{html.escape(file_id)}</code>\n"
+            f"🔑 <code>{html.escape(file_id)}</code>"
+        )
+
+    if not lines:
+        await message.reply_text(
+            "❌ در این پیام یا گروه، فایل قابل استفاده‌ای پیدا نشد."
         )
         return CHOOSING
 
-    file_id = content.get("file_id", "").strip()
-    if not file_id:
-        await update.message.reply_text("❌ شناسه فایل در دیتابیس پیدا نشد.")
-        return CHOOSING
-
-    page_name = html.escape(db[node_id].get("name", "بدون نام"))
-
-    msg = (
-        f"🆔 <b>کد اختصاصی فایل از صفحه {page_name}:</b>\n\n"
-        f"📥 متن دریافت مستقیم:\n"
-        f"<code>file-id:{file_id}</code>\n\n"
-        f"🔑 شناسه فایل:\n"
-        f"<code>{file_id}</code>"
+    await message.reply_text(
+        "✅ شناسه فایل(ها):\n\n" + "\n\n".join(lines),
+        parse_mode="HTML",
     )
-
-    await update.message.reply_text(msg, parse_mode="HTML")
     return CHOOSING
 
 
