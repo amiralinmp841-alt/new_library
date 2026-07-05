@@ -731,7 +731,7 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ رنگ این پوشه به «{new_color_name}» تغییر یافت.",
-        reply_markup=get_keyboard(parent_id, True)
+        reply_markup=get_keyboard(parent_id, True, user_id=user_id)
     )
 
     return CHOOSING
@@ -822,7 +822,7 @@ async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
-def get_keyboard(node_id, is_admin):
+def get_keyboard(node_id, is_admin, user_id=None):
     db = load_db()
     node = db.get(node_id)
 
@@ -860,6 +860,7 @@ def get_keyboard(node_id, is_admin):
         favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
         if favorites:
             keyboard.insert(0, [KeyboardButton("📁 پوشه دلخواه")])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     # --- دکمه‌های کنترلی ادمین ---
     if is_admin:
@@ -2425,7 +2426,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                     await update.message.reply_text(
                         f"📂 مسیر فایل:\n{path_text}",
-                        reply_markup=get_keyboard(current_node, is_admin),
+                        reply_markup=get_keyboard(current_node, is_admin, user_id=user_id),
                         parse_mode="HTML",
                         disable_web_page_preview=True
                     )
@@ -2497,7 +2498,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await update.message.reply_text(
                     f"📂 مسیر:\n{path_text}",
-                    reply_markup=get_keyboard(parent_id, is_admin),
+                    reply_markup=get_keyboard(parent_id, is_admin, user_id=user_id),
                     parse_mode="HTML",
                     disable_web_page_preview=True
                 )
@@ -2512,7 +2513,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 f"📂 مسیر:\n{path_text}",
-                reply_markup=get_keyboard(target_id, is_admin),
+                reply_markup=get_keyboard(target_id, is_admin, user_id=user_id),
                 parse_mode="HTML",
                 disable_web_page_preview=True
             )
@@ -2545,7 +2546,7 @@ async def send_start_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
     contents = userdata.get("start_page_contents", [])
-    root_keyboard = get_keyboard("root", is_admin)
+    root_keyboard = get_keyboard("root", is_admin, user_id=user_id)
 
     # 1. اگر هیچ محتوایی تنظیم نشده بود، فقط پیام پیش‌فرض به همراه کیبورد را بفرست
     if not contents:
@@ -2765,7 +2766,7 @@ async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
         await query.message.reply_text(
             "✅ پنل بسته شد.",
-            reply_markup=get_keyboard(current, is_admin)
+            reply_markup=get_keyboard(current, is_admin, user_id=update.effective_user.id)
         )
     
         return CHOOSING
@@ -2962,7 +2963,7 @@ async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "❌ لغو":
-        await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_keyboard("root", True))
+        await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_keyboard("root", True, user_id=update.effective_user.id))
         return CHOOSING
     
     if text == "✅ تایید و ارسال عمومی" or text == "✅ تایید و ارسال به کاربر":
@@ -2987,7 +2988,7 @@ async def receive_broadcast_content(update: Update, context: ContextTypes.DEFAUL
                 count += 1
             except: continue
         
-        await update.message.reply_text(f"✅ پیام شما با موفقیت به {count} کاربر ارسال شد.", reply_markup=get_keyboard("root", True))
+        await update.message.reply_text(f"✅ پیام شما با موفقیت به {count} کاربر ارسال شد.", reply_markup=get_keyboard("root", True, user_id=update.effective_user.id))
         return CHOOSING
 
     # ذخیره پیام برای ارسال انبوه
@@ -3735,7 +3736,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = context.user_data.get("current_node", "root")
         await update.message.reply_text(
             "لغو شد.",
-            reply_markup=get_keyboard(current, is_admin)
+            reply_markup=get_keyboard(current, is_admin, user_id=user_id)
         )
         return CHOOSING
 
@@ -3759,7 +3760,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 "بازگشت به صفحه اصلی",
-                reply_markup=get_keyboard("root", is_admin)
+                reply_markup=get_keyboard("root", is_admin, user_id=user_id)
             )
             return CHOOSING
 
@@ -3767,7 +3768,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🏠 صفحه اصلی":
         context.user_data['current_node'] = 'root'
         set_report_page(context, "root")
-        await update.message.reply_text("به صفحه اصلی بازگشتید.", reply_markup=get_keyboard('root', is_admin))
+        await update.message.reply_text("به صفحه اصلی بازگشتید.", reply_markup=get_keyboard('root', is_admin, user_id=user_id))
         return CHOOSING
     
     if text.startswith("🔙 بازگشت"):
@@ -3793,7 +3794,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
         await update.message.reply_text(
             return_message,
-            reply_markup=get_keyboard(target_node, is_admin),
+            reply_markup=get_keyboard(target_node, is_admin, user_id=user_id),
             parse_mode="HTML",
             disable_web_page_preview=True
         )
@@ -3904,10 +3905,10 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_text(
                     f"دکمه '{target_name}' و تمام زیرمجموعه‌هایش حذف شد.",
-                    reply_markup=get_keyboard(current_node_id, is_admin)
+                    reply_markup=get_keyboard(current_node_id, is_admin, user_id=user_id)
                 )
             else:
-                await update.message.reply_text("دکمه یافت نشد.", reply_markup=get_keyboard(current_node_id, is_admin))
+                await update.message.reply_text("دکمه یافت نشد.", reply_markup=get_keyboard(current_node_id, is_admin, user_id=user_id))
             return CHOOSING
 
         if text == "📥 دریافت بکاپ":
@@ -3999,7 +4000,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 "🧹 محتوای این صفحه حذف شد و گزارش تفصیلی آن برای کانال مدیریت ارسال گردید.",
-                reply_markup=get_keyboard(current_node_id, True)
+                reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
             )
             return CHOOSING
 
@@ -4089,7 +4090,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
             await update.message.reply_text(
                 "لغو شد.",
-                reply_markup=get_keyboard(current_node_id, is_admin)
+                reply_markup=get_keyboard(current_node_id, is_admin, user_id=user_id)
             )
             return CHOOSING
         
@@ -4133,7 +4134,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
                 await update.message.reply_text(
                     "✅ چیدمان جدید ذخیره شد.",
-                    reply_markup=get_keyboard(current_node_id, True)
+                    reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
                 )
                 return CHOOSING
 
@@ -4173,7 +4174,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"↩️ آخرین تغییر بازگردانده شد.\n"
                 f"📂 پوشه فعلی: {node_name}\n"
                 f"🗺 مسیر: {path_str}",
-                reply_markup=get_keyboard(valid_node, True),
+                reply_markup=get_keyboard(valid_node, True, user_id=user_id),
                 parse_mode="HTML",
                 disable_web_page_preview=True
             )
@@ -4220,7 +4221,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"↪️ تغییر دوباره اعمال شد.\n"
                 f"📂 پوشه فعلی: {node_name}\n"
                 f"🗺 مسیر: {path_str}",
-                reply_markup=get_keyboard(valid_node, True),
+                reply_markup=get_keyboard(valid_node, True, user_id=user_id),
                 parse_mode="HTML",
                 disable_web_page_preview=True
             )
@@ -4253,7 +4254,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"📂 {child_node['name']}\n"
                 f"<blockquote expandable>🗺 مسیر: {path_str}</blockquote>",
-                reply_markup=get_keyboard(child_id, is_admin),
+                reply_markup=get_keyboard(child_id, is_admin, user_id=user_id),
                 parse_mode="HTML",
                 disable_web_page_preview=True
             )
@@ -4281,7 +4282,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "❌ لغو":
         current = context.user_data.get("current_node", "root")
-        await update.message.reply_text("لغو شد.", reply_markup=get_keyboard(current, True))
+        await update.message.reply_text("لغو شد.", reply_markup=get_keyboard(current, True, user_id=update.effective_user.id)
         return CHOOSING
 
     new_name = update.message.text
@@ -4310,7 +4311,7 @@ async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_db(db, context=context)
     
     current = context.user_data.get("current_node", "root")
-    await update.message.reply_text("✅ نام دکمه ویرایش شد.", reply_markup=get_keyboard(current, True))
+    await update.message.reply_text("✅ نام دکمه ویرایش شد.", reply_markup=get_keyboard(current, True, user_id=update.effective_user.id))
     return CHOOSING
 
 
@@ -4660,7 +4661,7 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         msg,
-        reply_markup=get_keyboard("admin_mgmt", True),
+        reply_markup=get_keyboard("admin_mgmt", True, user_id=update.effective_user.id),
         parse_mode="HTML",
         disable_web_page_preview=True
     )
@@ -4709,7 +4710,7 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "❌ لغو":
         current = context.user_data.get('current_node', 'root')
-        await update.message.reply_text("لغو شد.", reply_markup=get_keyboard(current, True))
+        await update.message.reply_text("لغو شد.", reply_markup=get_keyboard(current, True, user_id=update.effective_user.id))
         return CHOOSING
 
     db = load_db()
@@ -4772,7 +4773,7 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "✅ دکمه با تمام زیرمجموعه‌ها کپی شد.",
-            reply_markup=get_keyboard(current_node_id, True)
+            reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
         )
         return CHOOSING
 
@@ -4816,7 +4817,7 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"✅ دکمه '{text}' ساخته شد.",
-        reply_markup=get_keyboard(current_node_id, True)
+        reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
     )
     return CHOOSING
 
@@ -4917,7 +4918,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = context.user_data.get("current_node", "root")
         await msg.reply_text(
             "ابتدا از طریق دکمه '➕ افزودن محتوا' وارد حالت افزودن محتوا شوید.",
-            reply_markup=get_keyboard(current, True),
+            reply_markup=get_keyboard(current, True, user_id=update.effective_user.id),
         )
         return CHOOSING
 
@@ -4927,7 +4928,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("change_target", None)
         await msg.reply_text(
             "عملیات لغو شد.",
-            reply_markup=get_keyboard(current, True),
+            reply_markup=get_keyboard(current, True, user_id=update.effective_user.id),
         )
         return CHOOSING
 
@@ -4938,7 +4939,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("change_target", None)
             await msg.reply_text(
                 "چیزی برای ذخیره وجود نداشت.",
-                reply_markup=get_keyboard(current, True),
+                reply_markup=get_keyboard(current, True, user_id=update.effective_user.id),
             )
             return CHOOSING
 
@@ -5033,7 +5034,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await msg.reply_text(
             msg_text,
-            reply_markup=get_keyboard(current_node_id, True),
+            reply_markup=get_keyboard(current_node_id, True, user_id=update.effective_user.id),
         )
         return CHOOSING
 
@@ -5190,7 +5191,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = context.user_data.get('current_node', 'root')
         await update.message.reply_text(
             "لغو شد.",
-            reply_markup=get_keyboard(current, True)
+            reply_markup=get_keyboard(current, True, user_id=update.effective_user.id)
         )
         return CHOOSING
 
@@ -5231,7 +5232,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 "✅ database.json با موفقیت وارد شد.",
-                reply_markup=get_keyboard("root", True)
+                reply_markup=get_keyboard("root", True, user_id=update.effective_user.id)
             )
             return CHOOSING
 
@@ -5264,7 +5265,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_text(
                 "✅ بکاپ ZIP با موفقیت وارد شد.",
-                reply_markup=get_keyboard("root", True)
+                reply_markup=get_keyboard("root", True, user_id=update.effective_user.id)
             )
             return CHOOSING
 
@@ -5286,7 +5287,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         "لغو شد.",
-        reply_markup=get_keyboard(current, is_admin)
+        reply_markup=get_keyboard(current, is_admin, user_id=update.effective_user.id)
     )
     
     return CHOOSING
