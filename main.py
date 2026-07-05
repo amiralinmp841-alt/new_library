@@ -4282,7 +4282,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "❌ لغو":
         current = context.user_data.get("current_node", "root")
-        await update.message.reply_text("لغو شد.", reply_markup=get_keyboard(current, True, user_id=update.effective_user.id)
+        await update.message.reply_text("لغو شد.", reply_markup=get_keyboard(current, True, user_id=update.effective_user.id))
         return CHOOSING
 
     new_name = update.message.text
