@@ -317,46 +317,35 @@ def save_db(data, context=None):
     if context:
         caption = pop_pending_caption(context)
 
-    # اگر لاگ وجود نداشت، دیتابیس را به صورت عادی بفرست
-    if not caption:
-        return upload_db_to_telegram(caption="database.json")
+    # ۱. ابتدا فایل دیتابیس را با یک کپشن ثابت و ایمن آپلود می‌کنیم تا هرگز خطای طول کپشن ندهد
+    upload_success = upload_db_to_telegram(caption="database.json")
+    if not upload_success:
+        print("❌ Database file upload failed")
 
-    # تقسیم لاگ در صورت وجود
-    # محاسبه طول هدر برای احتساب در سقف تلگرام (4096 کاراکتر)
-    # جهت امنیت بیشتر سقف مجاز را ۳۴۰۰ کاراکتر در نظر می‌گیریم
-    chunks = split_html_message_by_lines(caption, max_len=1000)
-    
-    if not chunks:
-        return upload_db_to_telegram(caption="database.json")
-        
-    total_parts = len(chunks)
+    # ۲. حالا اگر لاگ وجود داشت، آن را به قطعات مناسب تقسیم کرده و به ترتیب به گروه بک‌آپ می‌فرستیم
+    if caption:
+        # برای پیام متنی تلگرام، سقف ۴۰۹۶ است، ما ۳۰۰۰ کاراکتر را برای امنیت کامل در نظر می‌گیریم
+        chunks = split_html_message_by_lines(caption, max_len=3000)
+        total_parts = len(chunks)
 
-    # اگر فقط ۱ بخش بود، مستقیم آن را کپشن فایل زیپ دیتابیس قرار بده
-    if total_parts == 1:
-        return upload_db_to_telegram(caption=chunks[0])
-
-    # اگر چند بخش بود، تمام بخش‌ها بجز بخش آخر را به صورت پیامی ارسال کن
-    # بخش آخر را به عنوان کپشن فایل دیتابیس ارسال می‌کنیم تا حتما فایل همراه لاگ آپلود شود.
-    for i in range(total_parts - 1):
-        chunk_text = chunks[i]
-        # اضافه کردن عنوان ادامه لاگ در صورتی که ساختار هدر قبلاً اعمال شده باشد
-        # (فرمت کلی کپشن توسط format_admin_log ایجاد می‌شود که هدر را دارد)
-        try:
-            # ارسال پیام متنی موقت از طریق ریکوئست های مستقیم یا کلاینت
-            run_telethon(
-                telethon_client.send_message(
-                    entity=DB_BACKUP_CHAT_ID,
-                    message=chunk_text,
-                    parse_mode="HTML"
+        for i, chunk_text in enumerate(chunks, 1):
+            # اگر لاگ بیش از ۱ صفحه بود، شماره صفحه را در انتهای آن درج می‌کنیم
+            footer = f"\n\n<i>📄 ادامه لاگ (صفحه {i} از {total_parts})</i>" if total_parts > 1 else ""
+            final_text = f"{chunk_text}{footer}"
+            
+            try:
+                run_telethon(
+                    telethon_client.send_message(
+                        entity=DB_BACKUP_CHAT_ID,
+                        message=final_text,
+                        parse_mode="HTML",
+                        link_preview=False # جلوگیری از شلوغ شدن گروه با پیش‌نمایش لینک‌ها
+                    )
                 )
-            )
-        except Exception as e:
-            print(f"❌ Error sending log chunk {i+1}: {e}")
+            except Exception as e:
+                print(f"❌ Error sending log part {i}: {e}")
 
-    # ارسال پارت نهایی به همراه فایل دیتابیس
-    last_chunk = chunks[-1]
-    return upload_db_to_telegram(caption=last_chunk)
-
+    return upload_success
 
 # ============ USERDATA BACKUP WITH TELEGRAM ============
 
@@ -1534,30 +1523,34 @@ def format_admin_log(admin_user, description):
     username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
     
     header = (
-        f"👑 <b>گزارش تغییرات دیتابیس</b>\n\n"
-        f"👤 ادمین: {admin_link}\n"
-        f"🆔 ID: <code>{admin_user.id}</code>\n"
-        f"👤 Username: {username}\n"
+        f"👑 <b>گزارش تغییرات دیتابیس</b>\n"
+        f"👤 ادمین: {admin_link} | 🆔: <code>{admin_user.id}</code>\n"
+        f"👤 یوزرنیم: {username}\n"
         f"--------------------------\n"
     )
+    return f"{header}{description}"
+def split_html_message_by_lines(text: str, max_len: int = 3000) -> list:
+    if not text:
+        return []
+    lines = text.split("\n")
+    chunks = []
+    current_chunk = []
+    current_length = 0
     
-    # اگر متن بزرگ بود، آن را از همین جا خرد کرده و هدر را به ابتدای تک‌تک بخش‌ها می‌چسبانیم
-    # با این کار خروجی نهایی متد format_admin_log متنی خواهد بود که پارت‌بندی شده و هدرها در آن توزیع شده‌اند.
-    max_chunk_len = 1000 - len(header) - 100
-    chunks = split_html_message_by_lines(description, max_len=max_chunk_len)
-    
-    if not chunks:
-        return header + description
-        
-    formatted_parts = []
-    total = len(chunks)
-    for i, chunk in enumerate(chunks, 1):
-        prefix = f"📄 <b>ادامه لاگ (بخش {i} از {total})</b>\n\n" if total > 1 else ""
-        formatted_parts.append(f"{header}{prefix}{chunk}")
-        
-    # بخش‌ها را با یک جداکننده خاص به هم می‌چسبانیم تا در save_db بتوانیم مجددا آن‌ها را تفکیک کنیم
-    return "\n===LOG_PART_SEPARATOR===\n".join(formatted_parts)
-
+    for line in lines:
+        line_len = len(line) + 1  # طول خط به همراه کاراکتر newline
+        if current_length + line_len > max_len:
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+            current_chunk = [line]
+            current_length = line_len
+        else:
+            current_chunk.append(line)
+            current_length += line_len
+            
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+    return chunks
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
