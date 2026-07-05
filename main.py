@@ -1434,31 +1434,46 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 if len(group_items) > 1:
                     media = []
                     valid_group = True
-
+                
+                    # پیدا کردن اولین caption معتبر داخل گروه
+                    group_caption = None
+                    group_entities = None
+                
+                    for gi in group_items:
+                        cap = gi.get("caption")
+                        if cap:
+                            group_caption = cap
+                            group_entities = gi.get("entities")
+                            break
+                
                     for idx2, group_item in enumerate(group_items):
-                        input_media = build_input_media(group_item, is_first=(idx2 == 0))
+                        input_media = build_input_media(
+                            group_item,
+                            is_first=(idx2 == 0),
+                            forced_caption=group_caption if idx2 == 0 else None,
+                            forced_entities=group_entities if idx2 == 0 else None,
+                        )
                         if input_media is None:
                             valid_group = False
                             break
                         media.append(input_media)
-
+                
                     if valid_group and media:
                         try:
                             sent_messages = await update.message.reply_media_group(media=media)
-
+                
                             for sent, original_index in zip(sent_messages, group_indices):
                                 sent_mapping[sent.message_id] = {
                                     "node_id": node_id,
                                     "content_index": original_index,
                                 }
-
+                
                             i = j
                             continue
-
+                
                         except Exception as group_error:
                             logging.error(f"Error sending media group: {group_error}")
-                            # fallback: اگر گروهی خطا داد، تکی بفرست
-
+                
                             for group_item, original_index in zip(group_items, group_indices):
                                 try:
                                     sent_msg = await send_single_content(update.message, group_item)
@@ -1469,7 +1484,7 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                         }
                                 except Exception as single_error:
                                     logging.error(f"Fallback single send failed: {single_error}")
-
+                
                             i = j
                             continue
 
@@ -1497,7 +1512,7 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
         text_content = item.get("text", "")
         text_escaped = escape(text_content)
         preview = text_escaped[:200] + "..." if len(text_escaped) > 200 else text_escaped
-        return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{preview}</blockquote>"
+        return f"📝 <b>پیام متنی {index}:</b>\n<blockquote expandable>{preview}</blockquote>"
     
     file_id = item.get("file_id", "")
     caption = item.get("caption", "")
@@ -1507,7 +1522,7 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
         f"📎 <b>فایل {index} ({msg_type}):</b>\n"
         f"📥 متن دریافت مستقیم:\n<code>file-id:{file_id}</code>\n"
         f"🔑 شناسه فایل:\n<code>{file_id}</code>\n"
-        f"✍️ کپشن: <blockquote>{caption_escaped}</blockquote>"
+        f"✍️ کپشن: <blockquote expandable>{caption_escaped}</blockquote>"
     )
 
 def format_admin_log(admin_user, description):
@@ -1564,77 +1579,74 @@ def pop_pending_backup_caption(context):
 
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    هندلر دریافت مستقیم فایل با متن ساده:
+    file-id:FILE_ID
+    """
     track_user_activity(update, count_message=True)
     user_id = update.effective_user.id
-
     if is_user_banned(user_id):
         await update.message.reply_text("⛔️ شما بن شده‌اید.")
+        return CHOOSING
+
+    if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
-    # استخراج بخش بعد از file-id:
-    parts = text.split(":", 1)
-    if len(parts) < 2:
-        await update.message.reply_text("⚠️ فرمت وارد شده صحیح نیست.")
+
+    logging.info(f"[direct_getfile] received text: {text[:80]}")
+
+    if not text.startswith("file-id:"):
         return
 
-    raw_id = parts[1].strip()
-    id_parts = raw_id.split("_")
-    if len(id_parts) < 2:
-        await update.message.reply_text("⚠️ شناسه فایل نامعتبر است.")
-        return
+    file_id = text[len("file-id:"):].strip()
 
-    node_id = id_parts[0]
-    try:
-        content_index = int(id_parts[1])
-    except ValueError:
-        await update.message.reply_text("⚠️ شناسه فایل نامعتبر است.")
-        return
+    if not file_id:
+        await update.message.reply_text("❌ شناسه فایل خالی است.")
+        raise ApplicationHandlerStop
 
-    db = load_db()
-    if node_id not in db or "contents" not in db[node_id]:
-        await update.message.reply_text("❌ فایل مورد نظر در دیتابیس ربات یافت نشد.")
-        return
+    chat_id = update.effective_chat.id
+    bot = context.bot
 
-    contents = db[node_id]["contents"]
-    if not (0 <= content_index < len(contents)):
-        await update.message.reply_text("❌ این فایل از روی سرور ربات حذف شده است.")
-        return
+    logging.info(f"[direct_getfile] extracted file_id: {file_id}")
 
-    item = contents[content_index]
-    
-    # ارسال فایل بر اساس نوع ذخیره شده آن در دیتابیس
-    try:
-        # برای ردیابی پیام ارسالی در حافظه موقت (برای ریپلای‌های بعدی)
-        sent_msg = None
-        
-        if item["type"] == "text":
-            sent_msg = await update.message.reply_text(item["text"], parse_mode="HTML")
-        elif item["type"] == "photo":
-            sent_msg = await update.message.reply_photo(photo=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
-        elif item["type"] == "document":
-            sent_msg = await update.message.reply_document(document=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
-        elif item["type"] == "audio":
-            sent_msg = await update.message.reply_audio(audio=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
-        elif item["type"] == "video":
-            sent_msg = await update.message.reply_video(video=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
-        elif item["type"] == "voice":
-            sent_msg = await update.message.reply_voice(voice=item["file_id"], caption=item.get("caption"), parse_mode="HTML")
-        else:
-            await update.message.reply_text("⚠️ فرمت فایل ذخیره شده پشتیبانی نمی‌شود.")
-            return
+    methods = [
+        (bot.send_photo, "photo"),
+        (bot.send_video, "video"),
+        (bot.send_document, "document"),
+        (bot.send_audio, "audio"),
+        (bot.send_voice, "voice"),
+        (bot.send_animation, "animation"),
+    ]
 
-        # ذخیره در mapping موقت کاربر جهت استفاده مجدد از قابلیت‌های ریپلای تغییر/حذف/دیپ لینک
-        if sent_msg:
-            if "sent_mapping" not in context.user_data:
-                context.user_data["sent_mapping"] = {}
-            context.user_data["sent_mapping"][sent_msg.message_id] = {
-                "node_id": node_id,
-                "content_index": content_index
-            }
+    last_error = None
 
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطا در ارسال فایل:\n{e}")
+    for method, arg_name in methods:
+        try:
+            kwargs = {arg_name: file_id}
+            await method(chat_id=chat_id, **kwargs)
+
+            logging.info(f"[direct_getfile] sent successfully as {arg_name}")
+
+            # خیلی مهم: نگذار هندلرهای بعدی هم همین پیام را پردازش کنند
+            raise ApplicationHandlerStop
+
+        except ApplicationHandlerStop:
+            raise
+
+        except Exception as e:
+            last_error = e
+            logging.warning(f"[direct_getfile] failed as {arg_name}: {e}")
+            continue
+
+    logging.error(f"[direct_getfile] all methods failed. last_error={last_error}")
+
+    await update.message.reply_text(
+        "❌ خطا: فایل یافت نشد یا شناسه نامعتبر است.\n"
+        "ممکن است این file_id مربوط به نوع فایل دیگری باشد یا برای این بات قابل استفاده نباشد."
+    )
+
+    raise ApplicationHandlerStop
 
 async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=False)
@@ -1662,10 +1674,31 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     node_id = target["node_id"]
     content_index = target["content_index"]
 
+    #allowed_types = {
+    #    "photo",
+    #    "video",
+    #    "document",
+    #    "audio",
+    #    "voice",
+    #    "animation",
+    #}
+    
+    #if content.get("type") not in allowed_types:
+    #    await update.message.reply_text(
+    #        "📝 این پیام یک متن عادی است و شناسه اختصاصی (File ID) ندارد."
+    #    )
+    #    return CHOOSING
+    if content.get("type") == "text":
+        await update.message.reply_text(
+            "📝 این پیام یک متن عادی است و شناسه اختصاصی (File ID) ندارد."
+        )
+        return CHOOSING
+        
     if node_id in db and 0 <= content_index < len(db[node_id].get("contents", [])):
         page_name = html.escape(db[node_id].get("name", "بدون نام"))
+        file_id = item.get("file_id", "")
         # ساختن شناسه یکتای اختصاصی برای این فایل
-        custom_file_id = f"file-id:{node_id}_{content_index}"
+        custom_file_id = f"file-id:{file_id}_{content_index}"
 
         msg = (
             f"🆔 <b>کد اختصاصی فایل:</b> <code>{page_name}</code>\n\n"
@@ -4696,7 +4729,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return WAITING_CONTENT
 
-def build_input_media(item, is_first=False):
+def build_input_media(item, is_first=False, forced_caption=None, forced_entities=None):
     """
     از روی item ذخیره‌شده، آبجکت InputMedia مناسب می‌سازد.
     فقط برای typeهای قابل استفاده در media_group استفاده شود.
@@ -4704,17 +4737,19 @@ def build_input_media(item, is_first=False):
     msg_type = item.get("type")
     file_id = item.get("file_id")
 
-    caption = item.get("caption", "") if is_first else None
-    entities = item.get("entities") if is_first else None
-
     kwargs = {"media": file_id}
 
-    if caption is not None:
-        kwargs["caption"] = caption
-        if entities is not None:
-            kwargs["caption_entities"] = entities
-        else:
-            kwargs["parse_mode"] = "HTML"
+    if is_first:
+        caption = forced_caption if forced_caption is not None else (item.get("caption") or "")
+        entities = forced_entities if forced_entities is not None else item.get("entities")
+
+        if caption:
+            kwargs["caption"] = caption
+
+            if entities:
+                kwargs["caption_entities"] = entities
+            else:
+                kwargs["parse_mode"] = "HTML"
 
     if msg_type == "photo":
         return InputMediaPhoto(**kwargs)
@@ -4729,6 +4764,7 @@ def build_input_media(item, is_first=False):
         return InputMediaAudio(**kwargs)
 
     return None
+
 
 async def send_single_content(message, item):
     """
