@@ -1688,6 +1688,7 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #        "📝 این پیام یک متن عادی است و شناسه اختصاصی (File ID) ندارد."
     #    )
     #    return CHOOSING
+    content = contents[content_index]   # ← اول این
     if content.get("type") == "text":
         await update.message.reply_text(
             "📝 این پیام یک متن عادی است و شناسه اختصاصی (File ID) ندارد."
