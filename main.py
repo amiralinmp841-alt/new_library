@@ -1656,61 +1656,69 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ شما بن شده‌اید.")
         return CHOOSING
 
-    db = load_db()
-
-    # حتماً باید روی پیام ربات ریپلای شده باشد
     if not update.message.reply_to_message:
-        await update.message.reply_text("⚠️ لطفاً این دستور را روی یکی از پیام‌های فایل ارسال شده توسط ربات ریپلای کنید.")
+        await update.message.reply_text(
+            "⚠️ لطفاً این دستور را روی یکی از پیام‌های ارسال‌شده توسط ربات ریپلای کنید."
+        )
         return CHOOSING
 
     replied_msg_id = update.message.reply_to_message.message_id
     sent_mapping = context.user_data.get("sent_mapping", {})
     target = sent_mapping.get(replied_msg_id)
 
+    # فقط فایل‌های آخرین پوشه که در حافظه این سشن ثبت شده‌اند قابل شناسایی‌اند
     if not target:
-        await update.message.reply_text("❌ این پیام فایلِ قابل‌شناسایی از حافظه ربات نیست.")
-        return CHOOSING
-
-    node_id = target["node_id"]
-    content_index = target["content_index"]
-
-    #allowed_types = {
-    #    "photo",
-    #    "video",
-    #    "document",
-    #    "audio",
-    #    "voice",
-    #    "animation",
-    #}
-    
-    #if content.get("type") not in allowed_types:
-    #    await update.message.reply_text(
-    #        "📝 این پیام یک متن عادی است و شناسه اختصاصی (File ID) ندارد."
-    #    )
-    #    return CHOOSING
-    content = contents[content_index]   # ← اول این
-    if content.get("type") == "text":
         await update.message.reply_text(
-            "📝 این پیام یک متن عادی است و شناسه اختصاصی (File ID) ندارد."
+            "❌ این پیام قابل شناسایی نیست.\n"
+            "فقط فایل‌های آخرین پوشه‌ای که ربات برای شما ارسال کرده قابل تشخیص هستند."
         )
         return CHOOSING
-        
-    if node_id in db and 0 <= content_index < len(db[node_id].get("contents", [])):
-        page_name = html.escape(db[node_id].get("name", "بدون نام"))
-        file_id = item.get("file_id", "")
-        # ساختن شناسه یکتای اختصاصی برای این فایل
-        custom_file_id = f"file-id:{file_id}_{content_index}"
 
-        msg = (
-            f"🆔 <b>کد اختصاصی فایل:</b> <code>{page_name}</code>\n\n"
-            f"با لمس عبارت زیر، آن را کپی کرده و به ربات بفرستید تا مستقیم فایل را دریافت کنید:\n\n"
-            f"<code>{custom_file_id}</code>"
-        )
-        await update.message.reply_text(msg, parse_mode="HTML")
+    node_id = target.get("node_id")
+    content_index = target.get("content_index")
+
+    if node_id is None or content_index is None:
+        await update.message.reply_text("❌ اطلاعات این پیام ناقص است و قابل بررسی نیست.")
         return CHOOSING
 
-    await update.message.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+    db = load_db()
+
+    if node_id not in db:
+        await update.message.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+        return CHOOSING
+
+    contents = db[node_id].get("contents", [])
+    if not (0 <= content_index < len(contents)):
+        await update.message.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+        return CHOOSING
+
+    content = contents[content_index]
+    msg_type = content.get("type", "text")
+
+    if msg_type == "text":
+        await update.message.reply_text(
+            "📝 این پیام متنی است و از طرف تلگرام file_id ندارد."
+        )
+        return CHOOSING
+
+    file_id = content.get("file_id", "").strip()
+    if not file_id:
+        await update.message.reply_text("❌ شناسه فایل در دیتابیس پیدا نشد.")
+        return CHOOSING
+
+    page_name = html.escape(db[node_id].get("name", "بدون نام"))
+
+    msg = (
+        f"🆔 <b>کد اختصاصی فایل از صفحه {page_name}:</b>\n\n"
+        f"📥 متن دریافت مستقیم:\n"
+        f"<code>file-id:{file_id}</code>\n\n"
+        f"🔑 شناسه فایل:\n"
+        f"<code>{file_id}</code>"
+    )
+
+    await update.message.reply_text(msg, parse_mode="HTML")
     return CHOOSING
+
 
 
 
@@ -4959,6 +4967,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     return CHOOSING
+
 def build_application():
     application = ApplicationBuilder().token(TOKEN).build()
 
