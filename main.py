@@ -787,8 +787,67 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("to_dict failed:", e)
 
-    # اگر این پرینت را در لاگ‌ها نبینی یعنی اصلاً آپدیت message_reaction به برنامه نمی‌رسد
+    reaction = update.message_reaction
+    if not reaction:
+        print("No message_reaction")
+        return
 
+    user_id = reaction.user.id if reaction.user else None
+    chat_id = reaction.chat.id
+    msg_id = reaction.message_id
+
+    print("reaction user_id:", user_id)
+    print("reaction chat_id:", chat_id)
+    print("reaction msg_id:", msg_id)
+
+    meta = get_reaction_mapping(chat_id, msg_id)
+    print("reaction meta:", meta)
+
+    if not meta:
+        print("No meta found for this reaction message")
+        return
+
+    node_id = meta["node_id"]
+    idx = meta["content_index"]
+
+    new_emojis = [r.emoji for r in reaction.new_reaction if hasattr(r, "emoji")]
+    old_emojis = [r.emoji for r in reaction.old_reaction if hasattr(r, "emoji")]
+
+    print("old emojis:", old_emojis)
+    print("new emojis:", new_emojis)
+
+    HEARTS = {"❤", "❤️"}
+    DISLIKES = {"👎"}
+
+    added_heart = any(e in HEARTS for e in new_emojis) and not any(e in HEARTS for e in old_emojis)
+    removed_heart = any(e in HEARTS for e in old_emojis) and not any(e in HEARTS for e in new_emojis)
+    added_dislike = any(e in DISLIKES for e in new_emojis) and not any(e in DISLIKES for e in old_emojis)
+
+    if added_heart:
+        if add_to_favorites(user_id, node_id, idx):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="✅ به پوشه دلخواه اضافه شد.",
+                reply_to_message_id=msg_id
+            )
+        else:
+            print("Already in favorites")
+
+    elif removed_heart:
+        if remove_from_favorites(user_id, node_id, idx):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="🗑 از پوشه دلخواه حذف شد.",
+                reply_to_message_id=msg_id
+            )
+
+    elif added_dislike:
+        if remove_from_favorites(user_id, node_id, idx):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="🗑 حذف شد.",
+                reply_to_message_id=msg_id
+            )
 
 async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -5420,9 +5479,6 @@ def build_application():
     application.add_handler(conv_handler, group=1)
 
     return application
-    
-import telegram
-import telegram.ext
 
 # ================= HEALTH & WEBHOOK =================
 async def health(request):
@@ -5431,24 +5487,9 @@ async def health(request):
 async def webhook_handler(request):
     app = request.app["tg"]
     data = await request.json()
-
-    print("RAW UPDATE JSON:", json.dumps(data, ensure_ascii=False))
-    print("telegram version:", telegram.__version__)
-    print("telegram ext version:", telegram.ext.__name__)
-
     update = Update.de_json(data, app.bot)
-
-    try:
-        print("PARSED UPDATE DICT:", update.to_dict())
-        print("HAS message_reaction:", getattr(update, "message_reaction", None))
-        print("HAS message:", getattr(update, "message", None))
-        print("HAS callback_query:", getattr(update, "callback_query", None))
-    except Exception as e:
-        print("UPDATE PARSE LOG ERROR:", repr(e))
-
     await app.process_update(update)
     return web.Response(text="OK")
-
 
 # ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======  ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======
 # ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======  ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======
