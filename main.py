@@ -593,20 +593,6 @@ def get_link(node_id, text, bot_username):
 def get_admin_link(admin_user):
     return f"<a href='tg://user?id={admin_user.id}'>{admin_user.full_name}</a>"
 
-# ساخت کپشن کامل لاگ
-def format_admin_log(admin_user, description):
-    admin_link = get_admin_link(admin_user)
-    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
-
-    return (
-        f"👑 <b>گزارش تغییرات دیتابیس</b>\n\n"
-        f"👤 ادمین: {admin_link}\n"
-        f"🆔 ID: <code>{admin_user.id}</code>\n"
-        f"👤 Username: {username}\n"
-        f"--------------------------\n"
-        f"{description}"
-    )
-
 # ذخیره کپشن در کانتکست (برای استفاده داخل save_db)
 def set_pending_caption(context, caption):
     context.user_data["pending_caption"] = caption
@@ -1474,29 +1460,6 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # ==========================================
 # ۱) تابع کمکی اصلاح شده برای تولید ساختار لاگ ادمین
 # ==========================================
-# تابع کمکی تقسیم هوشمندانه لاگ‌های طولانی بر اساس خطوط بدون شکستن تگ‌ها
-def split_html_message_by_lines(text: str, max_len: int = 1000) -> list:
-    if not text:
-        return []
-    lines = text.split("\n")
-    chunks = []
-    current_chunk = []
-    current_length = 0
-    
-    for line in lines:
-        line_len = len(line) + 1
-        if current_length + line_len > max_len:
-            if current_chunk:
-                chunks.append("\n".join(current_chunk))
-            current_chunk = [line]
-            current_length = line_len
-        else:
-            current_chunk.append(line)
-            current_length += line_len
-            
-    if current_chunk:
-        chunks.append("\n".join(current_chunk))
-    return chunks
 
 # تابع کمکی استخراج جزئیات دقیق فایل‌ها و متون برای بخش لاگ
 def get_item_log_details(item, index: int, bot_username: str = None) -> str:
@@ -1551,6 +1514,7 @@ def split_html_message_by_lines(text: str, max_len: int = 3000) -> list:
     if current_chunk:
         chunks.append("\n".join(current_chunk))
     return chunks
+
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
