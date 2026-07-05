@@ -313,39 +313,44 @@ def save_db(data, context=None):
         print("❌ Failed to save DB locally:", e)
         return False
 
-    caption = None
-    if context:
-        caption = pop_pending_caption(context)
+    log_caption = None
+    backup_caption = None
 
-    # ۱. ابتدا فایل دیتابیس را با یک کپشن ثابت و ایمن آپلود می‌کنیم تا هرگز خطای طول کپشن ندهد
-    upload_success = upload_db_to_telegram(caption="database.json")
+    if context:
+        log_caption = pop_pending_caption(context)
+        backup_caption = pop_pending_backup_caption(context)
+
+    if not backup_caption:
+        backup_caption = "database.json"
+
+    # اول فایل بکاپ با کپشن کوتاه
+    upload_success = upload_db_to_telegram(caption=backup_caption)
     if not upload_success:
         print("❌ Database file upload failed")
 
-    # ۲. حالا اگر لاگ وجود داشت، آن را به قطعات مناسب تقسیم کرده و به ترتیب به گروه بک‌آپ می‌فرستیم
-    if caption:
-        # برای پیام متنی تلگرام، سقف ۴۰۹۶ است، ما ۳۰۰۰ کاراکتر را برای امنیت کامل در نظر می‌گیریم
-        chunks = split_html_message_by_lines(caption, max_len=3000)
+    # بعد لاگ کامل به صورت چندتکه
+    if log_caption:
+        chunks = split_html_message_by_lines(log_caption, max_len=3000)
         total_parts = len(chunks)
 
         for i, chunk_text in enumerate(chunks, 1):
-            # اگر لاگ بیش از ۱ صفحه بود، شماره صفحه را در انتهای آن درج می‌کنیم
             footer = f"\n\n<i>📄 ادامه لاگ (صفحه {i} از {total_parts})</i>" if total_parts > 1 else ""
             final_text = f"{chunk_text}{footer}"
-            
+
             try:
                 run_telethon(
                     telethon_client.send_message(
                         entity=DB_BACKUP_CHAT_ID,
                         message=final_text,
                         parse_mode="HTML",
-                        link_preview=False # جلوگیری از شلوغ شدن گروه با پیش‌نمایش لینک‌ها
+                        link_preview=False
                     )
                 )
             except Exception as e:
                 print(f"❌ Error sending log part {i}: {e}")
 
     return upload_success
+
 
 # ============ USERDATA BACKUP WITH TELEGRAM ============
 
@@ -600,6 +605,27 @@ def set_pending_caption(context, caption):
 def pop_pending_caption(context):
     return context.user_data.pop("pending_caption", None)
 
+def set_pending_backup_caption(context, caption):
+    context.user_data["pending_backup_caption"] = caption
+
+def pop_pending_backup_caption(context):
+    return context.user_data.pop("pending_backup_caption", None)
+
+def format_backup_caption(admin_user, action_type):
+    admin_link = get_admin_link(admin_user)
+    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
+
+    text = (
+        f"👑 <b>بکاپ دیتابیس</b>\n"
+        f"👤 ادمین: {admin_link}\n"
+        f"🆔: <code>{admin_user.id}</code>\n"
+        f"👤 یوزرنیم: {username}\n"
+        f"⚙️ عملیات: <b>{action_type}</b>"
+    )
+
+    # برای اطمینان از محدودیت کپشن فایل تلگرام
+    return text[:1000]
+
 #------ دکمه های رنگی ----------
 async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -671,9 +697,12 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"از «{old_color_name}» به «{new_color_name}» تغییر کرد."
     )
 
-    caption = format_admin_log(update.effective_user, desc)
-    set_pending_caption(context, caption)
-
+    log_caption = format_admin_log(update.effective_user, desc)
+    backup_caption = format_backup_caption(update.effective_user, "تغییر رنگ پوشه")
+    
+    set_pending_caption(context, log_caption)
+    set_pending_backup_caption(context, backup_caption)
+    
     save_db(db, context=context)
 
     parent_id = db[current_node_id].get("parent", "root")
@@ -1515,6 +1544,24 @@ def split_html_message_by_lines(text: str, max_len: int = 3000) -> list:
         chunks.append("\n".join(current_chunk))
     return chunks
 
+def format_backup_caption(admin_user, action_type):
+    admin_link = get_admin_link(admin_user)
+    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
+
+    return (
+        f"👑 <b>بکاپ دیتابیس</b>\n"
+        f"👤 ادمین: {admin_link}\n"
+        f"🆔: <code>{admin_user.id}</code>\n"
+        f"👤 یوزرنیم: {username}\n"
+        f"⚙️ نوع پروسه: <b>{action_type}</b>"
+    )
+
+def set_pending_backup_caption(context, caption):
+    context.user_data["pending_backup_caption"] = caption
+
+def pop_pending_backup_caption(context):
+    return context.user_data.pop("pending_backup_caption", None)
+
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -1676,10 +1723,14 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
         desc = f"🗑 <b>حذف شدن فایل ها (تک مورد) از پوشه {node_link}:</b>\n\n" + get_item_log_details(removed_item, 1, bot_username)
         removed_count = 1
 
-    caption = format_admin_log(update.effective_user, desc)
-    set_pending_caption(context, caption)
-
+    log_caption = format_admin_log(update.effective_user, desc)
+    backup_caption = format_backup_caption(update.effective_user, "حذف فایل/محتوا")
+    
+    set_pending_caption(context, log_caption)
+    set_pending_backup_caption(context, backup_caption)
+    
     save_db(db, context=context)
+    
 
     # پاک‌کردن مپینگ این نود به دلیل تغییر ایندکس‌ها
     context.user_data["sent_mapping"] = {
@@ -3450,10 +3501,15 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parent_link = get_link(current_node_id, parent_name, bot_username)
                 child_link = get_link(target_id, target_name, bot_username)
                 desc = f"❌ پوشه {child_link} از {parent_link} حذف شد."
-                caption = format_admin_log(update.effective_user, desc)
-                set_pending_caption(context, caption)
+                
+                log_caption = format_admin_log(update.effective_user, desc)
+                backup_caption = format_backup_caption(update.effective_user, "حذف دکمه")
+                
+                set_pending_caption(context, log_caption)
+                set_pending_backup_caption(context, backup_caption)
                 
                 save_db(db, context=context)
+                
                 await update.message.reply_text(
                     f"دکمه '{target_name}' و تمام زیرمجموعه‌هایش حذف شد.",
                     reply_markup=get_keyboard(current_node_id, is_admin)
@@ -3540,11 +3596,14 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             desc = "\n\n".join(desc_parts)
 
             # ۴. قالب‌بندی با هدر ادمین و ست کردن برای save_db
-            caption = format_admin_log(update.effective_user, desc)
-            set_pending_caption(context, caption)
+            log_caption = format_admin_log(update.effective_user, desc)
+            backup_caption = format_backup_caption(update.effective_user, "حذف محتوای صفحه")
             
-            # ذخیره دیتابیس و اجرای پروسه ارسال لاگ تکه‌تکه شده به همراه فایل بکاپ
+            set_pending_caption(context, log_caption)
+            set_pending_backup_caption(context, backup_caption)
+            
             save_db(db, context=context)
+            
 
             await update.message.reply_text(
                 "🧹 محتوای این صفحه حذف شد و گزارش تفصیلی آن برای کانال مدیریت ارسال گردید.",
@@ -3644,11 +3703,15 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 node_name = db[current_node_id]["name"]
                 node_link = get_link(current_node_id, node_name, bot_username)
                 desc = f"🔀 چیدمان دکمه‌های پوشه {node_link} تغییر کرد."
-                caption = format_admin_log(update.effective_user, desc)
-                set_pending_caption(context, caption)
+                
+                log_caption = format_admin_log(update.effective_user, desc)
+                backup_caption = format_backup_caption(update.effective_user, "جابه‌جایی چیدمان")
+                
+                set_pending_caption(context, log_caption)
+                set_pending_backup_caption(context, backup_caption)
                 
                 save_db(db, context=context)
-        
+                
                 for key in ["reorder_remaining", "reorder_result", "reorder_mode"]:
                     context.user_data.pop(key, None)
         
@@ -3680,10 +3743,15 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             node_link = get_link(valid_node, node_name, bot_username)
         
             desc = f"↩️ آخرین تغییر بازگردانده شد. پوشه فعلی: {node_link}"
-            caption = format_admin_log(update.effective_user, desc)
-            set_pending_caption(context, caption)
-        
+            
+            log_caption = format_admin_log(update.effective_user, desc)
+            backup_caption = format_backup_caption(update.effective_user, "بازگشت به تغییر قبل (Undo)")
+            
+            set_pending_caption(context, log_caption)
+            set_pending_backup_caption(context, backup_caption)
+            
             save_db(last_db, context=context)
+            
         
             await update.message.reply_text(
                 f"↩️ آخرین تغییر بازگردانده شد.\n"
@@ -3722,10 +3790,15 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             node_name = next_db.get(valid_node, {}).get("name", "خانه")
             node_link = get_link(valid_node, node_name, bot_username)
             desc = f"↪️ تغییر دوباره اعمال شد. پوشه فعلی: {node_link}"
-            caption = format_admin_log(update.effective_user, desc)
-            set_pending_caption(context, caption)
-
+            
+            log_caption = format_admin_log(update.effective_user, desc)
+            backup_caption = format_backup_caption(update.effective_user, "بازگردانی دوباره (Redo)")
+            
+            set_pending_caption(context, log_caption)
+            set_pending_backup_caption(context, backup_caption)
+            
             save_db(next_db, context=context)
+            
             
             await update.message.reply_text(
                 f"↪️ تغییر دوباره اعمال شد.\n"
@@ -3800,20 +3873,26 @@ async def rename_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = load_db()
     if target_id in db:
-        push_admin_history(context, db)  # 👈 اینجا
-        db[target_id]["name"] = new_name
-
+        push_admin_history(context, db)
+    
         old_name = db[target_id]["name"]
         new_name = update.message.text
+    
+        db[target_id]["name"] = new_name
+    
         bot_username = context.bot.username
         old_link = get_link(target_id, old_name, bot_username)
         new_link = get_link(target_id, new_name, bot_username)
         desc = f"📝 نام پوشه {old_link} به {new_link} تغییر کرد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption)
-
+    
+        log_caption = format_admin_log(update.effective_user, desc)
+        backup_caption = format_backup_caption(update.effective_user, "ویرایش نام پوشه")
+    
+        set_pending_caption(context, log_caption)
+        set_pending_backup_caption(context, backup_caption)
+    
         save_db(db, context=context)
-
+    
     current = context.user_data.get("current_node", "root")
     await update.message.reply_text("✅ نام دکمه ویرایش شد.", reply_markup=get_keyboard(current, True))
     return CHOOSING
@@ -4256,11 +4335,15 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         copied_node_link = get_link(new_root_id, copied_node_name, bot_username)
         
         desc = f"📋 پوشه {copied_node_link} (کپی‌شده از روی هش) به {parent_link} اضافه شد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption)
         
-        # ذخیره دیتابیس با اعمال کپشن
+        log_caption = format_admin_log(update.effective_user, desc)
+        backup_caption = format_backup_caption(update.effective_user, "کپی پوشه با هش")
+        
+        set_pending_caption(context, log_caption)
+        set_pending_backup_caption(context, backup_caption)
+        
         save_db(db, context=context)
+        
 
         # افزایش آمار دکمه‌های ادمین
         userdata = load_userdata()
@@ -4296,12 +4379,15 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     child_link = get_link(new_id, child_name, bot_username)
     
     desc = f"➕ پوشه جدید {child_link} به {parent_link} اضافه شد."
-    caption = format_admin_log(update.effective_user, desc)
-    set_pending_caption(context, caption)
-
-    # ذخیره دیتابیس با اعمال کپشن
+    
+    log_caption = format_admin_log(update.effective_user, desc)
+    backup_caption = format_backup_caption(update.effective_user, "افزودن دکمه")
+    
+    set_pending_caption(context, log_caption)
+    set_pending_backup_caption(context, backup_caption)
+    
     save_db(db, context=context)
-
+    
     # افزایش آمار دکمه‌های ادمین
     userdata = load_userdata()
     if "sub_admins_buttons" not in userdata:
@@ -4513,10 +4599,20 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # ساخت و تنظیم لاگ نهایی ادمین
         desc = "\n\n".join(log_desc_parts)
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption)
-
+        
+        if change_target:
+            action_type = "جایگزینی محتوا"
+        else:
+            action_type = "افزودن محتوا"
+        
+        log_caption = format_admin_log(update.effective_user, desc)
+        backup_caption = format_backup_caption(update.effective_user, action_type)
+        
+        set_pending_caption(context, log_caption)
+        set_pending_backup_caption(context, backup_caption)
+        
         save_db(db, context=context)
+        
         context.user_data.pop("temp_content", None)
 
         await msg.reply_text(
@@ -4691,8 +4787,12 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # ۱. آماده‌سازی کپشن لاگ‌گیری در ابتدا
         desc = "📥 بکاپ جدید (ریستور دیتابیس) وارد شد."
-        caption = format_admin_log(update.effective_user, desc)
-        set_pending_caption(context, caption) # ذخیره در کانتکست جهت همگام‌سازی
+        log_caption = format_admin_log(update.effective_user, desc)
+        backup_caption = format_backup_caption(update.effective_user, "ریستور بکاپ")
+        
+        set_pending_caption(context, log_caption)
+        set_pending_backup_caption(context, backup_caption)
+        
 
         # ============================
         # CASE 1: فایل JSON مستقیم
@@ -4702,7 +4802,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f.write(byte_array)
 
             # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
-            upload_db_to_telegram(caption=caption)
+            save_db(restored_db, context=context)
 
             # پاکسازی تاریخچه و ریستارت نود به root
             context.user_data.pop("admin_history", None)
@@ -4734,7 +4834,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f.write(zf.read(db_name))
 
             # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
-            upload_db_to_telegram(caption=caption)
+            save_db(restored_db, context=context)
 
             # پاکسازی تاریخچه و ریستارت نود به root
             context.user_data.pop("admin_history", None)
