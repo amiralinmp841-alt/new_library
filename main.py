@@ -654,13 +654,11 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db[current_node_id]["style"] = new_style
 
     bot_username = context.bot.username
-    path = get_node_path_html(db, current_node_id, bot_username) # اضافه کردن مسیر
     node_name = db[current_node_id]["name"]
     node_link = get_link(current_node_id, node_name, bot_username)
 
     desc = (
         f"🎨 رنگ پوشه {node_link} "
-        f"🗂 مسیر: {path}\n"
         f"از «{old_color_name}» به «{new_color_name}» تغییر کرد."
     )
 
@@ -1477,45 +1475,6 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
         log_text += f"کپشن:\n<blockquote>{caption_escaped}</blockquote>"
     
     return log_text
-
-
-import html
-
-# این تابع کمک می‌کند تا لاگ‌ها حتماً زیر ۴۰۹۶ کاراکتر بمانند و تگ‌ها نشکنند
-def split_html_message_by_lines(text, max_len=3500):
-    lines = text.split('\n')
-    chunks = []
-    current_chunk = ""
-    for line in lines:
-        if len(current_chunk) + len(line) + 1 > max_len:
-            chunks.append(current_chunk)
-            current_chunk = line
-        else:
-            current_chunk += (line + "\n")
-    if current_chunk:
-        chunks.append(current_chunk)
-    return chunks
-
-# این تابع لاگ‌های طولانی را به صورت چندبخشی می‌فرستد
-async def send_long_admin_log(context, admin_chat_id, admin_user, desc: str):
-    header = f"👑 <b>گزارش تغییرات (ادامه لاگ)</b>\n👤 ادمین: {admin_user.full_name} (@{admin_user.username})\n🆔 <code>{admin_user.id}</code>\n--------------------------\n"
-    
-    chunks = split_html_message_by_lines(desc)
-    for i, chunk in enumerate(chunks, 1):
-        message = f"{header}📄 <b>بخش {i} از {len(chunks)}</b>\n\n{chunk}"
-        await context.bot.send_message(chat_id=admin_chat_id, text=message, parse_mode="HTML")
-
-# اصلاح تابع مسیر پوشه (برای خوانایی بیشتر در لاگ)
-def get_node_path_html(db, node_id, bot_username):
-    path = []
-    current_id = node_id
-    while current_id and current_id in db:
-        name = db[current_id].get("name", "بدون نام")
-        link = f"https://t.me/{bot_username}?start={current_id}"
-        path.append(f'<a href="{link}">{html.escape(name)}</a>')
-        current_id = db[current_id].get("parent")
-    path.reverse()
-    return " ⬅️ ".join(path)
 
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3451,11 +3410,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parent_name = db[current_node_id]["name"]
                 parent_link = get_link(current_node_id, parent_name, bot_username)
                 child_link = get_link(target_id, target_name, bot_username)
-                path = get_node_path_html(db, current_node_id, bot_username) # اضافه کردن مسیر
-                desc = (
-                    f"❌ پوشه {child_link} از {parent_link} حذف شد."
-                    f"🗂 مسیر والد: {get_node_path_html(db, current_node_id, bot_username)}"
-                )
+                desc = f"❌ پوشه {child_link} از {parent_link} حذف شد."
                 caption = format_admin_log(update.effective_user, desc)
                 set_pending_caption(context, caption)
                 
@@ -3515,44 +3470,22 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return WAITING_RENAME_BUTTON
 
         if text == "🧹 حذف محتوای صفحه":
-            # ۱. گرفتن snapshot از محتوا قبل از حذف
-            removed_items = list(db[current_node_id].get("contents", []))
-            
-            if not removed_items:
-                await update.message.reply_text("⚠️ این پوشه خالی است.")
-                return CHOOSING
-
             push_admin_history(context, db)
             db[current_node_id]["contents"] = []
 
-            # ۲. ساخت لاگ دقیق
             bot_username = context.bot.username
             node_name = db[current_node_id]["name"]
-            path = get_node_path_html(db, current_node_id, bot_username)
-            
-            desc_parts = [
-                f"🧹 <b>محتوای پوشه {node_name} حذف شد.</b>",
-                f"📂 <b>مسیر:</b> {path}",
-                f"📊 <b>تعداد آیتم‌های حذف شده:</b> {len(removed_items)}",
-                "--------------------------"
-            ]
-            
-            for i, item in enumerate(removed_items, 1):
-                desc_parts.append(get_item_log_details(item, i, bot_username))
-            
-            full_log = "\n".join(desc_parts)
-
-            # ۳. ارسال لاگ (اگر طولانی بود چندبخشی می‌شود)
-            # فرض بر این است که ADMIN_IDS را در دسترس دارید یا از context استفاده کنید
-            await send_long_admin_log(context, ADMIN_IDS[0], update.effective_user, full_log)
+            node_link = get_link(current_node_id, node_name, bot_username)
+            desc = f"🧹 محتوای پوشه {node_link} حذف شد."
+            caption = format_admin_log(update.effective_user, desc)
+            set_pending_caption(context, caption)
             
             save_db(db, context=context)
             await update.message.reply_text(
-                f"🧹 {len(removed_items)} مورد حذف شد و لاگ ارسال گردید.",
+                "🧹 محتوای این صفحه حذف شد.",
                 reply_markup=get_keyboard(current_node_id, True)
             )
             return CHOOSING
-
 
         if text == "🔑 دریافت ‌هش‌ولینک‌دکمه":
             children = db[current_node_id].get("children", [])
