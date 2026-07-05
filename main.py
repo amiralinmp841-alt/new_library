@@ -1882,8 +1882,8 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         parts = [
-            f"🆔 <b>کد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n"
-            "📥 متن داخل کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n\n"
+            f"🆔 <b>کد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n\n"
+            "📥 متن داخل کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n"
         ]
         for i, item in enumerate(valid_items, start=1):
             escaped_file_id = html.escape(item["file_id"])
