@@ -4802,6 +4802,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f.write(byte_array)
 
             # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
+            restored_db = load_db()
             save_db(restored_db, context=context)
 
             # پاکسازی تاریخچه و ریستارت نود به root
@@ -4834,6 +4835,7 @@ async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f.write(zf.read(db_name))
 
             # آپلود بکاپ در تلگرام با کپشن گزارش تغییرات ادمین
+            restored_db = load_db()
             save_db(restored_db, context=context)
 
             # پاکسازی تاریخچه و ریستارت نود به root
