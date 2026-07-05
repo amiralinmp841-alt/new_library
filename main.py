@@ -5420,6 +5420,9 @@ def build_application():
     application.add_handler(conv_handler, group=1)
 
     return application
+    
+import telegram
+import telegram.ext
 
 # ================= HEALTH & WEBHOOK =================
 async def health(request):
@@ -5428,9 +5431,24 @@ async def health(request):
 async def webhook_handler(request):
     app = request.app["tg"]
     data = await request.json()
+
+    print("RAW UPDATE JSON:", json.dumps(data, ensure_ascii=False))
+    print("telegram version:", telegram.__version__)
+    print("telegram ext version:", telegram.ext.__name__)
+
     update = Update.de_json(data, app.bot)
+
+    try:
+        print("PARSED UPDATE DICT:", update.to_dict())
+        print("HAS message_reaction:", getattr(update, "message_reaction", None))
+        print("HAS message:", getattr(update, "message", None))
+        print("HAS callback_query:", getattr(update, "callback_query", None))
+    except Exception as e:
+        print("UPDATE PARSE LOG ERROR:", repr(e))
+
     await app.process_update(update)
     return web.Response(text="OK")
+
 
 # ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======  ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======
 # ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======  ===👆🏻=== COMMEN CODE FOR BABIES/FATHER ===☝🏻=== COMMEN CODE FOR BABIES/FATHER =======
