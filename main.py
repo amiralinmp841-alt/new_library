@@ -313,15 +313,49 @@ def save_db(data, context=None):
         print("❌ Failed to save DB locally:", e)
         return False
 
-    # کپشن ادمین اگر وجود داشت → استفاده کن
     caption = None
     if context:
         caption = pop_pending_caption(context)
 
-    if caption is None:
-        caption = "database.json"
+    # اگر لاگ وجود نداشت، دیتابیس را به صورت عادی بفرست
+    if not caption:
+        return upload_db_to_telegram(caption="database.json")
 
-    return upload_db_to_telegram(caption=caption)
+    # تقسیم لاگ در صورت وجود
+    # محاسبه طول هدر برای احتساب در سقف تلگرام (4096 کاراکتر)
+    # جهت امنیت بیشتر سقف مجاز را ۳۴۰۰ کاراکتر در نظر می‌گیریم
+    chunks = split_html_message_by_lines(caption, max_len=1000)
+    
+    if not chunks:
+        return upload_db_to_telegram(caption="database.json")
+        
+    total_parts = len(chunks)
+
+    # اگر فقط ۱ بخش بود، مستقیم آن را کپشن فایل زیپ دیتابیس قرار بده
+    if total_parts == 1:
+        return upload_db_to_telegram(caption=chunks[0])
+
+    # اگر چند بخش بود، تمام بخش‌ها بجز بخش آخر را به صورت پیامی ارسال کن
+    # بخش آخر را به عنوان کپشن فایل دیتابیس ارسال می‌کنیم تا حتما فایل همراه لاگ آپلود شود.
+    for i in range(total_parts - 1):
+        chunk_text = chunks[i]
+        # اضافه کردن عنوان ادامه لاگ در صورتی که ساختار هدر قبلاً اعمال شده باشد
+        # (فرمت کلی کپشن توسط format_admin_log ایجاد می‌شود که هدر را دارد)
+        try:
+            # ارسال پیام متنی موقت از طریق ریکوئست های مستقیم یا کلاینت
+            run_telethon(
+                telethon_client.send_message(
+                    entity=DB_BACKUP_CHAT_ID,
+                    message=chunk_text,
+                    parse_mode="HTML"
+                )
+            )
+        except Exception as e:
+            print(f"❌ Error sending log chunk {i+1}: {e}")
+
+    # ارسال پارت نهایی به همراه فایل دیتابیس
+    last_chunk = chunks[-1]
+    return upload_db_to_telegram(caption=last_chunk)
 
 
 # ============ USERDATA BACKUP WITH TELEGRAM ============
@@ -1451,30 +1485,78 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # ==========================================
 # ۱) تابع کمکی اصلاح شده برای تولید ساختار لاگ ادمین
 # ==========================================
+# تابع کمکی تقسیم هوشمندانه لاگ‌های طولانی بر اساس خطوط بدون شکستن تگ‌ها
+def split_html_message_by_lines(text: str, max_len: int = 3400) -> list:
+    if not text:
+        return []
+    lines = text.split("\n")
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    
+    for line in lines:
+        line_len = len(line) + 1
+        if current_length + line_len > max_len:
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+            current_chunk = [line]
+            current_length = line_len
+        else:
+            current_chunk.append(line)
+            current_length += line_len
+            
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+    return chunks
+
+# تابع کمکی استخراج جزئیات دقیق فایل‌ها و متون برای بخش لاگ
 def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     msg_type = item.get("type", "text")
-    
     if msg_type == "text":
         text_content = item.get("text", "")
         text_escaped = escape(text_content)
-        return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{text_escaped}</blockquote>"
+        preview = text_escaped[:200] + "..." if len(text_escaped) > 200 else text_escaped
+        return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{preview}</blockquote>"
     
     file_id = item.get("file_id", "")
     caption = item.get("caption", "")
-    caption_escaped = escape(caption) if caption else ""
+    caption_escaped = escape(caption) if caption else "بدون کپشن"
     
-    get_text = f"<code>file-id:{file_id}</code>"
+    return (
+        f"📎 <b>فایل {index} ({msg_type}):</b>\n"
+        f"📥 متن دریافت مستقیم:\n<code>file-id:{file_id}</code>\n"
+        f"🔑 شناسه فایل:\n<code>{file_id}</code>\n"
+        f"✍️ کپشن: <blockquote>{caption_escaped}</blockquote>"
+    )
+
+def format_admin_log(admin_user, description):
+    admin_link = get_admin_link(admin_user)
+    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
     
-    log_text = (
-        f"📎 <b>فایل {index} ({msg_type})</b>\n"
-        f"📥 متن دریافت مستقیم:\n{get_text}\n"
-        f"🔑 شناسه خام فایل:\n<code>{file_id}</code>\n"
+    header = (
+        f"👑 <b>گزارش تغییرات دیتابیس</b>\n\n"
+        f"👤 ادمین: {admin_link}\n"
+        f"🆔 ID: <code>{admin_user.id}</code>\n"
+        f"👤 Username: {username}\n"
+        f"--------------------------\n"
     )
     
-    if caption_escaped:
-        log_text += f"کپشن:\n<blockquote>{caption_escaped}</blockquote>"
+    # اگر متن بزرگ بود، آن را از همین جا خرد کرده و هدر را به ابتدای تک‌تک بخش‌ها می‌چسبانیم
+    # با این کار خروجی نهایی متد format_admin_log متنی خواهد بود که پارت‌بندی شده و هدرها در آن توزیع شده‌اند.
+    max_chunk_len = 3400 - len(header) - 100
+    chunks = split_html_message_by_lines(description, max_len=max_chunk_len)
     
-    return log_text
+    if not chunks:
+        return header + description
+        
+    formatted_parts = []
+    total = len(chunks)
+    for i, chunk in enumerate(chunks, 1):
+        prefix = f"📄 <b>ادامه لاگ (بخش {i} از {total})</b>\n\n" if total > 1 else ""
+        formatted_parts.append(f"{header}{prefix}{chunk}")
+        
+    # بخش‌ها را با یک جداکننده خاص به هم می‌چسبانیم تا در save_db بتوانیم مجددا آن‌ها را تفکیک کنیم
+    return "\n===LOG_PART_SEPARATOR===\n".join(formatted_parts)
 
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3470,19 +3552,45 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return WAITING_RENAME_BUTTON
 
         if text == "🧹 حذف محتوای صفحه":
+            # ۱. گرفتن نسخه کپی از محتویات قبل از حذف (Snapshot)
+            removed_items = list(db[current_node_id].get("contents", []))
+            
+            if not removed_items:
+                await update.message.reply_text("⚠️ این پوشه فاقد هرگونه محتوا است.")
+                return CHOOSING
+
+            # ۲. پوش کردن در تاریخچه و حذف محتوا از دیتابیس
             push_admin_history(context, db)
             db[current_node_id]["contents"] = []
 
             bot_username = context.bot.username
             node_name = db[current_node_id]["name"]
             node_link = get_link(current_node_id, node_name, bot_username)
-            desc = f"🧹 محتوای پوشه {node_link} حذف شد."
+            path_html = get_node_path_html(db, current_node_id, bot_username)
+
+            # ۳. آماده‌سازی بدنه لاگ تفصیلی
+            desc_parts = [
+                f"🧹 <b>کل محتویات پوشه حذف شد</b>\n",
+                f"📁 <b>پوشه مقصد:</b> {node_link}",
+                f"🗂 <b>مسیر کامل:</b> {path_html}",
+                f"📊 <b>تعداد کل موارد حذف شده:</b> {len(removed_items)} مورد",
+                "───────────────────\n<b>📋 جزئیات موارد حذف شده:</b>"
+            ]
+
+            for i, item in enumerate(removed_items, 1):
+                desc_parts.append(get_item_log_details(item, i, bot_username))
+
+            desc = "\n\n".join(desc_parts)
+
+            # ۴. قالب‌بندی با هدر ادمین و ست کردن برای save_db
             caption = format_admin_log(update.effective_user, desc)
             set_pending_caption(context, caption)
             
+            # ذخیره دیتابیس و اجرای پروسه ارسال لاگ تکه‌تکه شده به همراه فایل بکاپ
             save_db(db, context=context)
+
             await update.message.reply_text(
-                "🧹 محتوای این صفحه حذف شد.",
+                "🧹 محتوای این صفحه حذف شد و گزارش تفصیلی آن برای کانال مدیریت ارسال گردید.",
                 reply_markup=get_keyboard(current_node_id, True)
             )
             return CHOOSING
