@@ -5292,7 +5292,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 def build_application():
-    application = ApplicationBuilder().token(TOKEN).allowed_updates(Update.ALL_TYPES).build()
+    application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(
         MessageHandler(
@@ -5459,8 +5459,16 @@ async def webhook_handler(request):
 async def main():
     tg_app = build_application()
     await tg_app.initialize()
-    await tg_app.bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
-
+    await tg_app.bot.set_webhook(
+        f"{WEBHOOK_URL}/{TOKEN}",
+        allowed_updates=[
+            "message",
+            "edited_message",
+            "callback_query",
+            "message_reaction",
+            "message_reaction_count",
+        ],
+    )
     # aiohttp web app برای Health check و Webhook
     webapp = web.Application()
     webapp["tg"] = tg_app
