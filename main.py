@@ -1451,39 +1451,67 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # ۱) تابع کمکی اصلاح شده برای تولید ساختار لاگ ادمین
 # ==========================================
 def get_item_log_details(item, index: int, bot_username: str = None) -> str:
-    """
-    برای هر آیتم (فایل یا متن) یک متن قالب‌بندی شده برای لاگ‌های ادمین با تگ <blockquote> می‌سازد.
-    شناسه فایل جهت کپی آسان در تگ <code> قرار داده می‌شود.
-    همچنین لینک مستقیم جهت باز کردن فایل در ربات با فرمت fd_FILEID ساخته می‌شود.
-    """
     msg_type = item.get("type", "text")
     
-    # اگر آیتم صرفاً پیام متنی باشد
     if msg_type == "text":
         text_content = item.get("text", "")
         text_escaped = escape(text_content)
         return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{text_escaped}</blockquote>"
     
-    # اگر آیتم یکی از انواع فایل‌های رسانه‌ای باشد
     file_id = item.get("file_id", "")
     caption = item.get("caption", "")
     caption_escaped = escape(caption) if caption else ""
     
-    # ایجاد لینک دیپ‌لینک مستقیم (با پیشوند fd_ به جای file_ جهت عدم تداخل با ایندکس‌ها)
-    if bot_username:
-        direct_link = f'<a href="https://t.me/{bot_username}?start=fd_{file_id}">مشاهده مستقیم فایل {index}</a>'
-    else:
-        direct_link = f"فایل {index} ({msg_type})"
+    # ساخت دستور اختصاصی برای دریافت فایل (بدون محدودیت طول)
+    # ادمین با کلیک روی این کد، آن را کپی کرده و می‌تواند به ربات بفرستد
+    get_command = f"<code>/getfile_{file_id}</code>"
     
-    # نمایش file_id در تگ code برای کپی سریع با یک کلیک
-    log_text = f"📎 {direct_link}\n🔑 شناسه فایل (برای کپی کلیک کنید):\n<code>{file_id}</code>\n"
+    log_text = (
+        f"📎 <b>فایل {index} ({msg_type})</b>\n"
+        f"📥 دستور دریافت مستقیم:\n{get_command}\n"
+        f"🔑 شناسه خام فایل:\n<code>{file_id}</code>\n"
+    )
     
     if caption_escaped:
-        log_text += f"کپشن فایل {index}:\n<blockquote>{caption_escaped}</blockquote>"
-    else:
-        log_text += f"کپشن فایل {index}: <i>(بدون کپشن)</i>"
-        
+        log_text += f"کپشن:\n<blockquote>{caption_escaped}</blockquote>"
+    
     return log_text
+
+async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    هندلری برای پیام‌هایی که با /getfile_ شروع می‌شوند.
+    این دستور خارج از سیستم استارت و دیپ‌لینک عمل می‌کند.
+    """
+    text = update.message.text
+    if not text or not text.startswith("/getfile_"):
+        return
+    
+    file_id = text[len("/getfile_"):]
+    chat_id = update.effective_chat.id
+    bot = context.bot
+    
+    methods = [
+        (bot.send_photo, "photo"),
+        (bot.send_video, "video"),
+        (bot.send_document, "document"),
+        (bot.send_audio, "audio"),
+        (bot.send_voice, "voice"),
+        (bot.send_animation, "animation"),
+    ]
+    
+    sent_status = False
+    for method, arg_name in methods:
+        try:
+            kwargs = {arg_name: file_id}
+            await method(chat_id=chat_id, **kwargs)
+            sent_status = True
+            break
+        except Exception:
+            continue
+    
+    if not sent_status:
+        await update.message.reply_text("❌ خطا: فایل یافت نشد یا شناسه نامعتبر است.")
+
 
 # ==========================================
 # ۴) اصلاح تابع handle_reply_delete (بروزرسانی لاگ‌ها با bot_username برای ساخت لینک صحیح)
@@ -1821,9 +1849,7 @@ async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "برای ادامه لطفاً دستور /start را بزنید."
     )
 
-# ==========================================
-# ۲) اصلاح بخش آغازین تابع start جهت پشتیبانی از دیپ‌لینک مستقیم file_id
-# ==========================================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=True)
     user_id = update.effective_user.id
@@ -1833,58 +1859,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove()
         )
         return ConversationHandler.END
-        
     userdata = load_userdata()
     sub_admins = userdata.get("sub_admins", [])
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
-    # پاک‌سازی کامل وضعیت قبلی موقت
+    # پاک‌سازی کامل وضعیت قبلی
+    #old_current_node = context.user_data.get("current_node", "root")
+
+    # فقط داده‌های موقتی پاک شوند
     context.user_data.pop("temp_content", None)
     context.user_data.pop("change_target", None)
     context.user_data.pop("current_report_node", None)
 
     db = load_db()
-    args = context.args  # payload ارسالی استارت
 
-    # 🔗 بررسی وجود دیپ‌لینک
+    args = context.args  # 👈 payload اینجاست
+    # اگر دیپ‌لینک فایل باشد
     if args:
         payload = args[0]
-
-        # ----------------- بخش دیپ‌لینک مستقیم بر اساس file_id -----------------
-        # فرمت لینک جدید: t.me/BotUsername?start=fd_FILEID
-        if payload.startswith("fd_"):
-            file_id = payload[len("fd_"):]
-            chat_id = update.effective_chat.id
-            bot = context.bot
-            
-            # حفظ موقعیت کاربر در پوشه فعلی (در صورت نبودن، روی ریشه تنظیم می‌شود)
-            if "current_node" not in context.user_data:
-                context.user_data["current_node"] = "root"
-            
-            methods = [
-                (bot.send_photo, "photo"),
-                (bot.send_video, "video"),
-                (bot.send_document, "document"),
-                (bot.send_audio, "audio"),
-                (bot.send_voice, "voice"),
-                (bot.send_animation, "animation"),
-            ]
-            
-            sent_status = False
-            for method, arg_name in methods:
-                try:
-                    kwargs = {arg_name: file_id}
-                    await method(chat_id=chat_id, **kwargs)
-                    sent_status = True
-                    break
-                except Exception:
-                    continue
-            
-            if not sent_status:
-                await update.message.reply_text("❌ امکان ارسال مستقیم این فایل وجود نداشت یا شناسه منقضی/نامعتبر است.")
-            
-            return CHOOSING
-        # ----------------------------------------------------------------------------
 
         node_id = None
         content_index = None
@@ -1975,7 +1967,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ لینک فایل نامعتبر است.")
             return CHOOSING
 
-    # 🔗 اگر start با هش/پوشه آمده
+    # 🔗 اگر start با هش اومده
     if args:
         target_id = args[0]
 
@@ -4676,6 +4668,11 @@ def build_application():
         group=0
     )
 
+    application.add_handler(
+        MessageHandler(filters.Regex(r"^/getfile_"), handle_direct_getfile),
+        group=0
+    )
+    
     # ادیت پیام
     application.add_handler(
         MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edit),
