@@ -24,7 +24,8 @@ from telegram import (
     InputMediaPhoto,
     InputMediaVideo,
     InputMediaDocument,
-    InputMediaAudio
+    InputMediaAudio,
+    MessageReactionUpdated
 )
 
 from telegram.ext import (
@@ -35,7 +36,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
     ConversationHandler,
-    ApplicationHandlerStop
+    ApplicationHandlerStop,
+    MessageReactionHandler
 )
 
 import copy
@@ -734,6 +736,89 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return CHOOSING
 
+# ========= favorite folder ===============
+
+def add_to_favorites(user_id, node_id, content_index):
+    userdata = load_userdata()
+    users = userdata.setdefault("users", {})
+    user_record = users.setdefault(str(user_id), {})
+    favorites = user_record.setdefault("favorites", [])
+
+    item = {"node_id": node_id, "content_index": content_index}
+    
+    # جلوگیری از تکراری بودن
+    if item not in favorites:
+        favorites.append(item)
+        save_userdata(userdata, upload=False)
+        return True
+    return False
+
+def remove_from_favorites(user_id, node_id, content_index):
+    userdata = load_userdata()
+    users = userdata.setdefault("users", {})
+    user_record = users.get(str(user_id), {})
+    favorites = user_record.get("favorites", [])
+
+    item = {"node_id": node_id, "content_index": content_index}
+    if item in favorites:
+        favorites.remove(item)
+        save_userdata(userdata, upload=False)
+        return True
+    return False
+
+def clear_all_favorites(user_id):
+    userdata = load_userdata()
+    users = userdata.setdefault("users", {})
+    user_record = users.get(str(user_id), {})
+    if "favorites" in user_record:
+        user_record["favorites"] = []
+        save_userdata(userdata, upload=True) # ذخیره و آپلود نهایی
+
+from telegram.ext import MessageReactionHandler
+from telegram import MessageReactionUpdated
+
+async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reaction = update.message_reaction
+    user_id = reaction.user.id
+    msg_id = reaction.message_id
+    
+    # چک کردن اینکه این پیام در نقشه ما هست یا نه
+    sent_mapping = context.user_data.get("sent_mapping", {})
+    meta = sent_mapping.get(msg_id)
+    
+    if not meta:
+        return
+
+    node_id = meta["node_id"]
+    idx = meta["content_index"]
+    
+    # بررسی تغییرات ری‌اکشن
+    new_emojis = [r.emoji for r in reaction.new_reaction]
+    old_emojis = [r.emoji for r in reaction.old_reaction]
+
+    # اگر قلب اضافه شد
+    if "❤️" in new_emojis and "❤️" not in old_emojis:
+        if add_to_favorites(user_id, node_id, idx):
+            await context.bot.send_message(reaction.chat.id, "✅ به پوشه دلخواه اضافه شد.", 
+                                           reply_to_message_id=msg_id)
+            
+    # اگر قلب برداشته شد
+    if "❤️" in old_emojis and "❤️" not in new_emojis:
+        if remove_from_favorites(user_id, node_id, idx):
+            await context.bot.send_message(reaction.chat.id, "🗑 از پوشه دلخواه حذف شد.", 
+                                           reply_to_message_id=msg_id)
+                                           
+    # اگر انگشت اشاره پایین (👎) اضافه شد (برای پاک کردن در صفحه Favorites)
+    if "👎" in new_emojis and "👎" not in old_emojis:
+        # چک کنیم آیا کاربر در صفحه Favorites است؟ (می‌تونی با یک flag در user_data بفهمی)
+        if remove_from_favorites(user_id, node_id, idx):
+            await context.bot.send_message(reaction.chat.id, "🗑 حذف شد.", reply_to_message_id=msg_id)
+
+async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clear_all_favorites(update.effective_user.id)
+    await update.message.reply_text("✅ پوشه دلخواه پاکسازی شد.", 
+                                    reply_markup=get_keyboard("root", False, user_id=update.effective_user.id))
+    return CHOOSING
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
@@ -768,6 +853,13 @@ def get_keyboard(node_id, is_admin):
                 row = []
     if row:
         keyboard.append(row)
+
+    # ========= favorite folder ===============
+    if user_id:
+        userdata = load_userdata()
+        favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
+        if favorites:
+            keyboard.insert(0, [KeyboardButton("📁 پوشه دلخواه")])
 
     # --- دکمه‌های کنترلی ادمین ---
     if is_admin:
@@ -3928,6 +4020,30 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return CHOOSING
 
+        # ========= favorite folder ======================== favorite folder ======================== favorite folder ===============
+        if text == "📁 پوشه دلخواه":
+            userdata = load_userdata()
+            favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
+            
+            if not favorites:
+                await update.message.reply_text("پوشه دلخواه شما خالی است.")
+                return CHOOSING
+    
+            await update.message.reply_text(
+                "📁 پوشه دلخواه\n"
+                "جهت حذف هر کدام از فایل ها، همینجا روی آن فایل ری اکت 👎 بزنین.\n"
+                "جهت حذف همه محتوای صفحه و پنهان شدن آیکون پوشه دلخواه، دستور /clear را بزنید!"
+            )
+    
+            db = load_db()
+            for fav in favorites:
+                node = db.get(fav["node_id"])
+                if node and "contents" in node and len(node["contents"]) > fav["content_index"]:
+                    item = node["contents"][fav["content_index"]]
+                    sent = await send_single_content(update.message, item)
+                    if sent:
+                        context.user_data.setdefault("sent_mapping", {})[sent.message_id] = fav
+    
 
         if text.startswith("🔑 "):
             target_name = text.replace("🔑 ", "")
@@ -4109,7 +4225,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 disable_web_page_preview=True
             )
             return CHOOSING
-        
+
 
     # 3. هندل کردن ناوبری (کلیک روی دکمه‌های پوشه)
     # چک کنیم آیا تکست کاربر نام یکی از دکمه‌های زیرمجموعه است؟
@@ -5176,7 +5292,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 def build_application():
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = ApplicationBuilder().token(TOKEN).allowed_updates(Update.ALL_TYPES).build()
 
     application.add_handler(
         MessageHandler(
@@ -5192,6 +5308,7 @@ def build_application():
     application.add_handler(CommandHandler("red", set_node_style), group=0)
     application.add_handler(CommandHandler("none", set_node_style), group=0)
     application.add_handler(CommandHandler("on_of_search", toggle_smart_search), group=0)
+    application.add_handler(MessageReactionHandler(handle_reaction))
 
     # اگر خواستی not_started موقتاً برای دیباگ کلاً حذفش کن
     application.add_handler(
