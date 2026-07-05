@@ -1486,7 +1486,7 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # ۱) تابع کمکی اصلاح شده برای تولید ساختار لاگ ادمین
 # ==========================================
 # تابع کمکی تقسیم هوشمندانه لاگ‌های طولانی بر اساس خطوط بدون شکستن تگ‌ها
-def split_html_message_by_lines(text: str, max_len: int = 3400) -> list:
+def split_html_message_by_lines(text: str, max_len: int = 1000) -> list:
     if not text:
         return []
     lines = text.split("\n")
@@ -1543,7 +1543,7 @@ def format_admin_log(admin_user, description):
     
     # اگر متن بزرگ بود، آن را از همین جا خرد کرده و هدر را به ابتدای تک‌تک بخش‌ها می‌چسبانیم
     # با این کار خروجی نهایی متد format_admin_log متنی خواهد بود که پارت‌بندی شده و هدرها در آن توزیع شده‌اند.
-    max_chunk_len = 3400 - len(header) - 100
+    max_chunk_len = 1000 - len(header) - 100
     chunks = split_html_message_by_lines(description, max_len=max_chunk_len)
     
     if not chunks:
