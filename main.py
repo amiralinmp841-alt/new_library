@@ -202,21 +202,24 @@ async def _upload_file_to_telegram(chat_id, file_path, caption=None, parse_mode=
     try:
         if not os.path.exists(file_path):
             print(f"❌ File not found for upload: {file_path}")
-            return False
+            return None
 
-        await telethon_client.send_file(
+        sent_message = await telethon_client.send_file(
             entity=chat_id,
             file=file_path,
             caption=caption or f"backup: {os.path.basename(file_path)}",
-            parse_mode=parse_mode  # ← ← ← پشتیبانی از HTML / Markdown
+            parse_mode=parse_mode
         )
 
         print(f"⬆️ Uploaded to Telegram group: {file_path}")
-        return True
+
+        # مهم: خود پیام آپلودشده را برگردان
+        return sent_message
 
     except Exception as e:
         print(f"❌ Failed to upload file to Telegram: {e}")
-        return False
+        return None
+
 
 
 async def _download_latest_file_from_telegram(chat_id, filename, save_path):
@@ -323,18 +326,32 @@ def save_db(data, context=None):
     if not backup_caption:
         backup_caption = "database.json"
 
-    # اول فایل بکاپ با کپشن کوتاه
-    upload_success = upload_db_to_telegram(caption=backup_caption)
-    if not upload_success:
-        print("❌ Database file upload failed")
+    # اول فایل بکاپ را آپلود کن و خود پیام آپلودشده را بگیر
+    backup_msg = upload_db_to_telegram(caption=backup_caption)
 
-    # بعد لاگ کامل به صورت چندتکه
+    if not backup_msg:
+        print("❌ Database file upload failed")
+        return False
+
+    backup_msg_id = getattr(backup_msg, "id", None)
+
+    if not backup_msg_id:
+        print("❌ Uploaded backup message has no message id")
+        return False
+
+    # بعد لاگ کامل را به صورت چندتکه، ریپلای روی همان فایل بکاپ بفرست
     if log_caption:
         chunks = split_html_message_by_lines(log_caption, max_len=3000)
         total_parts = len(chunks)
 
         for i, chunk_text in enumerate(chunks, 1):
-            footer = f"\n\n<i>📄 ادامه لاگ (صفحه {i} از {total_parts})</i>" if total_parts > 1 else ""
+            footer = (
+                f"\n\n<i>📄 ادامه لاگ "
+                f"بخش {i} از {total_parts}</i>"
+                if total_parts > 1
+                else ""
+            )
+
             final_text = f"{chunk_text}{footer}"
 
             try:
@@ -343,13 +360,15 @@ def save_db(data, context=None):
                         entity=DB_BACKUP_CHAT_ID,
                         message=final_text,
                         parse_mode="HTML",
-                        link_preview=False
+                        link_preview=False,
+                        reply_to=backup_msg_id
                     )
                 )
             except Exception as e:
                 print(f"❌ Error sending log part {i}: {e}")
 
-    return upload_success
+    return True
+
 
 
 # ============ USERDATA BACKUP WITH TELEGRAM ============
@@ -1622,6 +1641,7 @@ def format_admin_log(admin_user, description):
         f"--------------------------\n"
     )
     return f"{header}{description}"
+
 def split_html_message_by_lines(text: str, max_len: int = 3000) -> list:
     if not text:
         return []
@@ -1874,7 +1894,7 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_id = html.escape(valid_items[0]["file_id"])
         text_msg = (
             f"🆔 <b>کد اختصاصی فایل از صفحه {page_name}:</b>\n\n"
-            f"📥 متن داخل کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n\n"
+            f"📥 متن کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n\n"
             f"📥 متن دریافت مستقیم از ربات:\n"
             f"<code>file-id:{file_id}</code>\n\n"
             f"🔑 شناسه فایل تلگرام:\n"
@@ -1883,7 +1903,7 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         parts = [
             f"🆔 <b>کد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n\n"
-            "📥 متن داخل کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n"
+            "📥 متن کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n"
         ]
         for i, item in enumerate(valid_items, start=1):
             escaped_file_id = html.escape(item["file_id"])
