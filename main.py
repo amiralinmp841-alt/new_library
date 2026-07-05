@@ -1255,30 +1255,116 @@ async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = load_db()
     bot_username = context.bot.username
+    msg = update.message
 
-    # اگر روی پیام ربات ریپلای شده باشد => دیپ‌لینک فایل
-    if update.message.reply_to_message:
-        replied_msg_id = update.message.reply_to_message.message_id
+    # اگر روی پیام ربات ریپلای شده باشد => دیپ‌لینک فایل / گروه فایل
+    if msg.reply_to_message:
+        replied_msg_id = msg.reply_to_message.message_id
         sent_mapping = context.user_data.get("sent_mapping", {})
         target = sent_mapping.get(replied_msg_id)
 
-        if target:
-            node_id = target["node_id"]
-            content_index = target["content_index"]
+        if not target:
+            await msg.reply_text("❌ این پیام فایلِ قابل‌شناسایی از حافظه ربات نیست.")
+            return CHOOSING
 
-            if node_id in db and 0 <= content_index < len(db[node_id].get("contents", [])):
-                page_name = html.escape(db[node_id].get("name", "بدون نام"))
-                deep_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
+        node_id = target.get("node_id")
+        content_index = target.get("content_index")
 
-                msg = (
-                    f"🔗 <b>دیپ‌لینک فایل:</b> <code>{page_name}</code>\n\n"
-                    f"برای اشتراک‌گذاری، روی لینک زیر بزنید:\n"
-                    f"<code>{html.escape(deep_link)}</code>"
-                )
-                await update.message.reply_text(msg, parse_mode="HTML")
-                return CHOOSING
+        if node_id is None or content_index is None:
+            await msg.reply_text("❌ اطلاعات این پیام ناقص است.")
+            return CHOOSING
 
-        await update.message.reply_text("❌ این پیام فایلِ قابل‌شناسایی از حافظه ربات نیست.")
+        if node_id not in db or "contents" not in db[node_id]:
+            await msg.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+            return CHOOSING
+
+        contents = db[node_id].get("contents", [])
+
+        try:
+            idx = int(content_index)
+        except (TypeError, ValueError):
+            await msg.reply_text("❌ اطلاعات این پیام نامعتبر است.")
+            return CHOOSING
+
+        if not (0 <= idx < len(contents)):
+            await msg.reply_text("❌ فایل مورد نظر در دیتابیس پیدا نشد.")
+            return CHOOSING
+
+        target_item = contents[idx]
+        msg_type = target_item.get("type", "text")
+        media_group_id = target_item.get("media_group_id")
+        groupable_types = {"photo", "video", "document", "audio"}
+
+        matched_items = []
+
+        # اگر عضو گروه فایل باشد، مثل handle_reply_delete همه اعضای گروه را پیدا کن
+        if media_group_id and msg_type in groupable_types:
+            start = idx
+            while start > 0:
+                prev_item = contents[start - 1]
+                if (
+                    prev_item.get("media_group_id") == media_group_id
+                    and prev_item.get("type") in groupable_types
+                ):
+                    start -= 1
+                else:
+                    break
+
+            end = idx
+            while end + 1 < len(contents):
+                next_item = contents[end + 1]
+                if (
+                    next_item.get("media_group_id") == media_group_id
+                    and next_item.get("type") in groupable_types
+                ):
+                    end += 1
+                else:
+                    break
+
+            for i in range(start, end + 1):
+                matched_items.append((i, contents[i]))
+        else:
+            matched_items.append((idx, target_item))
+
+        page_name = html.escape(db[node_id].get("name", "بدون نام"))
+
+        # اگر فقط یک مورد بود
+        if len(matched_items) == 1:
+            only_index, _ = matched_items[0]
+            deep_link = f"https://t.me/{bot_username}?start=file_{node_id}_{only_index}"
+
+            text_msg = (
+                f"🔗 <b>دیپ‌لینک فایل:</b> <code>{page_name}</code>\n\n"
+                f"برای اشتراک‌گذاری، روی لینک زیر بزنید:\n"
+                f"<code>{html.escape(deep_link)}</code>"
+            )
+            await msg.reply_text(text_msg, parse_mode="HTML")
+            return CHOOSING
+
+        # اگر گروه فایل بود، دیپ‌لینک همه را بده
+        parts = [f"🔗 <b>دیپ‌لینک فایل‌های این گروه از صفحه:</b> <code>{page_name}</code>\n"]
+
+        shown_count = 0
+        for item_index, item in matched_items:
+            item_type = item.get("type", "text")
+
+            if item_type == "text":
+                continue
+
+            deep_link = f"https://t.me/{bot_username}?start=file_{node_id}_{item_index}"
+            shown_count += 1
+
+            parts.append(
+                f"📎 <b>فایل {shown_count} ({html.escape(item_type)}):</b>\n"
+                f"<code>{html.escape(deep_link)}</code>"
+            )
+
+        if shown_count == 0:
+            await msg.reply_text("❌ در این گروه فایل، مورد قابل اشتراک‌گذاری پیدا نشد.")
+            return CHOOSING
+
+        text_msg = "\n\n".join(parts)
+        await msg.reply_text(text_msg, parse_mode="HTML")
         return CHOOSING
 
     # حالت عادی: دیپ‌لینک پوشه
@@ -1291,13 +1377,13 @@ async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deep_link = f"https://t.me/{bot_username}?start={node_id}"
     page_name = html.escape(db[node_id].get("name", "بدون نام"))
 
-    msg = (
+    text_msg = (
         f"🔗 <b>دیپ‌لینک صفحه:</b> <code>{page_name}</code>\n\n"
         f"برای اشتراک‌گذاری، روی لینک زیر بزنید:\n"
         f"<code>{html.escape(deep_link)}</code>"
     )
 
-    await update.message.reply_text(msg, parse_mode="HTML")
+    await update.message.reply_text(text_msg, parse_mode="HTML")
     return CHOOSING
 
 async def start_chat_with_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1788,20 +1874,24 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_id = html.escape(valid_items[0]["file_id"])
         text_msg = (
             f"🆔 <b>کد اختصاصی فایل از صفحه {page_name}:</b>\n\n"
-            f"📥 متن دریافت مستقیم:\n"
+            f"📥 متن داخل کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n\n"
+            f"📥 متن دریافت مستقیم از ربات:\n"
             f"<code>file-id:{file_id}</code>\n\n"
-            f"🔑 شناسه فایل:\n"
+            f"🔑 شناسه فایل تلگرام:\n"
             f"<code>{file_id}</code>"
         )
     else:
-        parts = [f"🆔 <b>کد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n"]
+        parts = [
+            f"🆔 <b>کد اختصاصی فایل‌های این گروه از صفحه {page_name}:</b>\n"
+            "📥 متن داخل کادر <code>file-id:...</code> را کپی کرده و برای ربات ارسال کنید تا فایل مربوطه را دریافت کنید.\n\n"
+        ]
         for i, item in enumerate(valid_items, start=1):
             escaped_file_id = html.escape(item["file_id"])
             parts.append(
                 f"📎 <b>فایل {i} ({html.escape(item['type'])}):</b>\n"
-                f"📥 متن دریافت مستقیم:\n"
+                f"📥 متن دریافت مستقیم از ربات:\n"
                 f"<code>file-id:{escaped_file_id}</code>\n"
-                f"🔑 شناسه فایل:\n"
+                f"🔑 شناسه فایل تلگرام:\n"
                 f"<code>{escaped_file_id}</code>"
             )
 
