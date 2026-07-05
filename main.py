@@ -1942,12 +1942,20 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("❌ اطلاعات این پیام ناقص است و قابل بررسی نیست.")
         return CHOOSING
 
-    current_node = context.user_data.get("current_node", "root")
-    if node_id != current_node:
-        await msg.reply_text(
-            "❌ فقط فایل‌های مربوط به پوشه فعلی قابل شناسایی هستند."
-        )
+    node_id = target.get("node_id")
+    content_index = target.get("content_index")
+    
+    if node_id is None or content_index is None:
+        await msg.reply_text("❌ اطلاعات این پیام ناقص است و قابل بررسی نیست.")
         return CHOOSING
+    
+
+    #current_node = context.user_data.get("current_node", "root")
+    #if node_id != current_node:
+    #    await msg.reply_text(
+    #        "❌ فقط فایل‌های مربوط به پوشه فعلی قابل شناسایی هستند."
+    #    )
+    #    return CHOOSING
 
     db = load_db()
 
