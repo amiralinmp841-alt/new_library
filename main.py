@@ -5292,9 +5292,14 @@ def build_application():
     application.add_handler(CommandHandler("red", set_node_style), group=0)
     application.add_handler(CommandHandler("none", set_node_style), group=0)
     application.add_handler(CommandHandler("on_of_search", toggle_smart_search), group=0)
-    application.add_handler(MessageReactionHandler(handle_reaction))
+    application.add_handler(
+        MessageReactionHandler(
+            handle_reaction,
+            message_reaction_types=MessageReactionHandler.MESSAGE_REACTION
+        ),
+        group=0
+    )
 
-    # اگر خواستی not_started موقتاً برای دیباگ کلاً حذفش کن
     application.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), not_started),
         group=0
@@ -5314,7 +5319,6 @@ def build_application():
                 CommandHandler("deeplink", deeplink_command),
                 CommandHandler("chat", start_chat_with_admin),
                 CommandHandler("file_id", file_id_command), # 👈 اضافه شدن کامند جدید به منو
-                # اینا باید داخل کانورسیشن باشند
                 CommandHandler("change", handle_reply_change),
                 CommandHandler("del", handle_reply_delete),
 
@@ -5443,6 +5447,7 @@ async def webhook_handler(request):
 async def main():
     tg_app = build_application()
     await tg_app.initialize()
+    await tg_app.start()
     await tg_app.bot.set_webhook(
         f"{WEBHOOK_URL}/{TOKEN}",
         allowed_updates=[
@@ -5452,6 +5457,7 @@ async def main():
             "message_reaction",
             "message_reaction_count",
         ],
+        drop_pending_updates=True,
     )
     # aiohttp web app برای Health check و Webhook
     webapp = web.Application()
