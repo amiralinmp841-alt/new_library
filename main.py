@@ -1762,7 +1762,7 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
 
         file_id = (item.get("file_id") or "").strip()
-        if not file_i:
+        if not file_id:
             no_id_count += 1
             continue
 
@@ -1806,7 +1806,7 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         if text_count > 0:
-            parts.append(f"📝 {text_count} پیام متنی در این گروه بود که file_i ندارد.")
+            parts.append(f"📝 {text_count} پیام متنی در این گروه بود که file_id ندارد.")
 
         if no_id_count > 0:
             parts.append(f"⚠️ برای {no_id_count} مورد شناسه فایل ذخیره نشده بود.")
