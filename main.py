@@ -1447,21 +1447,20 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
             logging.error(f"Error sending content: {e}")
 
         i += 1
-
 # ==========================================
-# ۱) تابع کمکی برای تولید ساختار لاگ ادمین به صورت خوانا و کوت‌کلپس شده
+# ۱) تابع کمکی اصلاح شده برای تولید ساختار لاگ ادمین
 # ==========================================
-def get_item_log_details(item, index: int) -> str:
+def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     """
     برای هر آیتم (فایل یا متن) یک متن قالب‌بندی شده برای لاگ‌های ادمین با تگ <blockquote> می‌سازد.
-    لینک فایل روی نام آن تنظیم می‌شود.
+    شناسه فایل جهت کپی آسان در تگ <code> قرار داده می‌شود.
+    همچنین لینک مستقیم جهت باز کردن فایل در ربات با فرمت fd_FILEID ساخته می‌شود.
     """
     msg_type = item.get("type", "text")
     
     # اگر آیتم صرفاً پیام متنی باشد
     if msg_type == "text":
         text_content = item.get("text", "")
-        # فرار دادن کاراکترهای خاص HTML برای جلوگیری از بهم ریختگی تگ‌ها
         text_escaped = escape(text_content)
         return f"📝 <b>پیام متنی {index}:</b>\n<blockquote>{text_escaped}</blockquote>"
     
@@ -1470,19 +1469,24 @@ def get_item_log_details(item, index: int) -> str:
     caption = item.get("caption", "")
     caption_escaped = escape(caption) if caption else ""
     
-    # لینک‌دار کردن نام فایل با ایجاد یک لینک اشتراک‌گذاری حاوی file_id جهت کپی/کلیک راحت ادمین
-    file_link = f'<a href="https://t.me/share/url?url={file_id}">فایل {index} ({msg_type})</a>'
+    # ایجاد لینک دیپ‌لینک مستقیم (با پیشوند fd_ به جای file_ جهت عدم تداخل با ایندکس‌ها)
+    if bot_username:
+        direct_link = f'<a href="https://t.me/{bot_username}?start=fd_{file_id}">مشاهده مستقیم فایل {index}</a>'
+    else:
+        direct_link = f"فایل {index} ({msg_type})"
     
-    log_text = f"📎 {file_link}\n"
+    # نمایش file_id در تگ code برای کپی سریع با یک کلیک
+    log_text = f"📎 {direct_link}\n🔑 شناسه فایل (برای کپی کلیک کنید):\n<code>{file_id}</code>\n"
+    
     if caption_escaped:
         log_text += f"کپشن فایل {index}:\n<blockquote>{caption_escaped}</blockquote>"
     else:
         log_text += f"کپشن فایل {index}: <i>(بدون کپشن)</i>"
         
     return log_text
-    
+
 # ==========================================
-# ۳) اصلاح تابع handle_reply_delete (حذف با لاگ جزئیات فایل/کپشن‌ها)
+# ۴) اصلاح تابع handle_reply_delete (بروزرسانی لاگ‌ها با bot_username برای ساخت لینک صحیح)
 # ==========================================
 async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -1564,7 +1568,7 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
         # ساخت لاگ حذف گروه رسانه‌ای
         log_desc_parts = [f"🗑 <b>حذف شدن فایل ها (آلبوم) از پوشه {node_link}:</b>\n"]
         for i, r_item in enumerate(removed_items, start=1):
-            log_desc_parts.append(get_item_log_details(r_item, i))
+            log_desc_parts.append(get_item_log_details(r_item, i, bot_username))
         desc = "\n\n".join(log_desc_parts)
         removed_count = len(removed_items)
     else:
@@ -1572,7 +1576,7 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
         removed_items.append(removed_item)
         
         # ساخت لاگ حذف تک محتوا
-        desc = f"🗑 <b>حذف شدن فایل ها (تک مورد) از پوشه {node_link}:</b>\n\n" + get_item_log_details(removed_item, 1)
+        desc = f"🗑 <b>حذف شدن فایل ها (تک مورد) از پوشه {node_link}:</b>\n\n" + get_item_log_details(removed_item, 1, bot_username)
         removed_count = 1
 
     caption = format_admin_log(update.effective_user, desc)
@@ -1591,7 +1595,6 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text(f"✅ {removed_count} مورد با موفقیت از دیتابیس این پوشه حذف شد.")
     else:
         await msg.reply_text("✅ فایل با موفقیت از دیتابیس این پوشه حذف شد.")
-
 
 
 async def handle_reply_change(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1819,9 +1822,8 @@ async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ==========================================
-# ۴) اصلاح بخش آغازین تابع start (اضافه کردن پشتیبانی از دیپ‌لینک مستقیم file_id بدون تغییر پوشه کاربر)
+# ۲) اصلاح بخش آغازین تابع start جهت پشتیبانی از دیپ‌لینک مستقیم file_id
 # ==========================================
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=True)
     user_id = update.effective_user.id
@@ -1831,24 +1833,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove()
         )
         return ConversationHandler.END
+        
     userdata = load_userdata()
     sub_admins = userdata.get("sub_admins", [])
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
-    # پاک‌سازی کامل وضعیت قبلی
-    #old_current_node = context.user_data.get("current_node", "root")
-
-    # فقط داده‌های موقتی پاک شوند
+    # پاک‌سازی کامل وضعیت قبلی موقت
     context.user_data.pop("temp_content", None)
     context.user_data.pop("change_target", None)
     context.user_data.pop("current_report_node", None)
 
     db = load_db()
+    args = context.args  # payload ارسالی استارت
 
-    args = context.args  # 👈 payload اینجاست
-    # اگر دیپ‌لینک فایل باشد
+    # 🔗 بررسی وجود دیپ‌لینک
     if args:
         payload = args[0]
+
+        # ----------------- بخش دیپ‌لینک مستقیم بر اساس file_id -----------------
+        # فرمت لینک جدید: t.me/BotUsername?start=fd_FILEID
+        if payload.startswith("fd_"):
+            file_id = payload[len("fd_"):]
+            chat_id = update.effective_chat.id
+            bot = context.bot
+            
+            # حفظ موقعیت کاربر در پوشه فعلی (در صورت نبودن، روی ریشه تنظیم می‌شود)
+            if "current_node" not in context.user_data:
+                context.user_data["current_node"] = "root"
+            
+            methods = [
+                (bot.send_photo, "photo"),
+                (bot.send_video, "video"),
+                (bot.send_document, "document"),
+                (bot.send_audio, "audio"),
+                (bot.send_voice, "voice"),
+                (bot.send_animation, "animation"),
+            ]
+            
+            sent_status = False
+            for method, arg_name in methods:
+                try:
+                    kwargs = {arg_name: file_id}
+                    await method(chat_id=chat_id, **kwargs)
+                    sent_status = True
+                    break
+                except Exception:
+                    continue
+            
+            if not sent_status:
+                await update.message.reply_text("❌ امکان ارسال مستقیم این فایل وجود نداشت یا شناسه منقضی/نامعتبر است.")
+            
+            return CHOOSING
+        # ----------------------------------------------------------------------------
 
         node_id = None
         content_index = None
@@ -1939,7 +1975,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ لینک فایل نامعتبر است.")
             return CHOOSING
 
-    # 🔗 اگر start با هش اومده
+    # 🔗 اگر start با هش/پوشه آمده
     if args:
         target_id = args[0]
 
@@ -4259,7 +4295,7 @@ def extract_message_content(msg):
     return None
 
 # ==========================================
-# ۲) اصلاح تابع receive_content (ثبت و جایگزینی نهایی با جزئیات کامل لاگ)
+# ۳) اصلاح تابع receive_content (بروزرسانی لاگ‌ها با bot_username برای ساخت لینک صحیح)
 # ==========================================
 async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -4341,18 +4377,18 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 log_desc_parts.append(f"🔄 <b>جایگزینی محتوا در پوشه {node_link}:</b>\n")
                 log_desc_parts.append("<b>❌ موارد حذف شده:</b>")
                 for i, o_item in enumerate(old_items, start=1):
-                    log_desc_parts.append(get_item_log_details(o_item, i))
+                    log_desc_parts.append(get_item_log_details(o_item, i, bot_username))
                 
                 log_desc_parts.append("\n<b>📥 موارد جدید جایگزین شده:</b>")
                 for i, n_item in enumerate(final_contents, start=1):
-                    log_desc_parts.append(get_item_log_details(n_item, i))
+                    log_desc_parts.append(get_item_log_details(n_item, i, bot_username))
             else:
                 db[current_node_id]["contents"].extend(final_contents)
                 msg_text = "⚠️ خطا در تطابق مسیر! فایل‌ها به عنوان محتوای جدید به انتهای پوشه اضافه شدند."
                 
                 log_desc_parts.append(f"📥 <b>افزودن محتوا (به دلیل خطای مسیر جایگزینی) در پوشه {node_link}:</b>")
                 for i, n_item in enumerate(final_contents, start=1):
-                    log_desc_parts.append(get_item_log_details(n_item, i))
+                    log_desc_parts.append(get_item_log_details(n_item, i, bot_username))
 
             context.user_data.pop("change_target", None)
         else:
@@ -4362,7 +4398,7 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ساخت لاگ اضافه شدن محتوای جدید
             log_desc_parts.append(f"📥 <b>اضافه شدن فایل/محتوای جدید به پوشه {node_link}:</b>\n")
             for i, n_item in enumerate(final_contents, start=1):
-                log_desc_parts.append(get_item_log_details(n_item, i))
+                log_desc_parts.append(get_item_log_details(n_item, i, bot_username))
 
         context.user_data.pop("sent_mapping", None)
 
