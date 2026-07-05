@@ -862,6 +862,25 @@ async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     return CHOOSING
 
+def save_reaction_mapping(chat_id, message_id, node_id, content_index):
+    userdata = load_userdata()
+    reaction_map = userdata.setdefault("reaction_map", {})
+
+    key = f"{chat_id}:{message_id}"
+    reaction_map[key] = {
+        "node_id": node_id,
+        "content_index": content_index
+    }
+
+    save_userdata(userdata, upload=False)
+
+
+def get_reaction_mapping(chat_id, message_id):
+    userdata = load_userdata()
+    reaction_map = userdata.get("reaction_map", {})
+
+    key = f"{chat_id}:{message_id}"
+    return reaction_map.get(key)
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
@@ -5536,4 +5555,4 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__=="__main__":
-    asyncio.run(main())
+    asyncio.run(main())s
