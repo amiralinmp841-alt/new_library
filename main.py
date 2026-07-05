@@ -1462,13 +1462,11 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     caption = item.get("caption", "")
     caption_escaped = escape(caption) if caption else ""
     
-    # ساخت متن ساده کپی‌شونده بدون پیشوند اسلش (کامند)
-    # ادمین با کلیک، این متن را کپی و به ربات می‌فرستد
-    get_command = f"<code>file-id:{file_id}</code>"
+    get_text = f"<code>file-id:{file_id}</code>"
     
     log_text = (
         f"📎 <b>فایل {index} ({msg_type})</b>\n"
-        f"📥 متن دریافت مستقیم:\n{get_command}\n"
+        f"📥 متن دریافت مستقیم:\n{get_text}\n"
         f"🔑 شناسه خام فایل:\n<code>{file_id}</code>\n"
     )
     
@@ -1477,19 +1475,34 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     
     return log_text
 
+
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    هندلری برای پیام‌هایی که حاوی شناسه فایل با پیشوند file-id: هستند.
-    این پیام‌ها متنی ساده بوده و از فیلترهای کامند عبور می‌کنند.
+    هندلر دریافت مستقیم فایل با متن ساده:
+    file-id:FILE_ID
     """
-    text = update.message.text
-    if not text or not text.startswith("file-id:"):
+
+    if not update.message or not update.message.text:
         return
-    
-    file_id = text[len("file-id:"):]
+
+    text = update.message.text.strip()
+
+    logging.info(f"[direct_getfile] received text: {text[:80]}")
+
+    if not text.startswith("file-id:"):
+        return
+
+    file_id = text[len("file-id:"):].strip()
+
+    if not file_id:
+        await update.message.reply_text("❌ شناسه فایل خالی است.")
+        raise ApplicationHandlerStop
+
     chat_id = update.effective_chat.id
     bot = context.bot
-    
+
+    logging.info(f"[direct_getfile] extracted file_id: {file_id}")
+
     methods = [
         (bot.send_photo, "photo"),
         (bot.send_video, "video"),
@@ -1498,19 +1511,35 @@ async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TY
         (bot.send_voice, "voice"),
         (bot.send_animation, "animation"),
     ]
-    
-    sent_status = False
+
+    last_error = None
+
     for method, arg_name in methods:
         try:
             kwargs = {arg_name: file_id}
             await method(chat_id=chat_id, **kwargs)
-            sent_status = True
-            break
-        except Exception:
+
+            logging.info(f"[direct_getfile] sent successfully as {arg_name}")
+
+            # خیلی مهم: نگذار هندلرهای بعدی هم همین پیام را پردازش کنند
+            raise ApplicationHandlerStop
+
+        except ApplicationHandlerStop:
+            raise
+
+        except Exception as e:
+            last_error = e
+            logging.warning(f"[direct_getfile] failed as {arg_name}: {e}")
             continue
-    
-    if not sent_status:
-        await update.message.reply_text("❌ خطا: فایل یافت نشد یا شناسه نامعتبر است.")
+
+    logging.error(f"[direct_getfile] all methods failed. last_error={last_error}")
+
+    await update.message.reply_text(
+        "❌ خطا: فایل یافت نشد یا شناسه نامعتبر است.\n"
+        "ممکن است این file_id مربوط به نوع فایل دیگری باشد یا برای این بات قابل استفاده نباشد."
+    )
+
+    raise ApplicationHandlerStop
 
 
 # ==========================================
@@ -3178,7 +3207,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     # 🛑 اگر پیام مربوط به دریافت مستقیم فایل بود، پردازش ناوبری را متوقف کن
-    if text and text.startswith("file-id:"):
+    if text and text.strip().startswith("file-id:"):
         return CHOOSING
 
     user_id = update.effective_user.id
@@ -4677,6 +4706,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def build_application():
     application = ApplicationBuilder().token(TOKEN).build()
 
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT & filters.Regex(r"^\s*file-id\s*:"),
+            handle_direct_getfile
+        ),
+        group=-1
+    )
+
     # هندلرهای واقعاً سراسری و تک‌مرحله‌ای
     application.add_handler(CommandHandler("green", set_node_style), group=0)
     application.add_handler(CommandHandler("blue", set_node_style), group=0)
@@ -4687,12 +4724,6 @@ def build_application():
     # اگر خواستی not_started موقتاً برای دیباگ کلاً حذفش کن
     application.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), not_started),
-        group=0
-    )
-
-    # هندلر جدید برای دریافت مستقیم فایل با ساختار متنی ساده
-    application.add_handler(
-        MessageHandler(filters.Regex(r"^file-id:"), handle_direct_getfile),
         group=0
     )
     
