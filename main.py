@@ -1788,7 +1788,7 @@ async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_id = html.escape(valid_items[0]["file_id"])
         text_msg = (
             f"🆔 <b>کد اختصاصی فایل از صفحه {page_name}:</b>\n\n"
-            f📥 متن دریافت مستقیم:\n"
+            f"📥 متن دریافت مستقیم:\n"
             f"<code>file-id:{file_id}</code>\n\n"
             f"🔑 شنا فایل:\n"
             f"<code>{file_id}</code>"
