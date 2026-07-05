@@ -1818,6 +1818,9 @@ async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "برای ادامه لطفاً دستور /start را بزنید."
     )
 
+# ==========================================
+# ۴) اصلاح بخش آغازین تابع start (اضافه کردن پشتیبانی از دیپ‌لینک مستقیم file_id بدون تغییر پوشه کاربر)
+# ==========================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=True)
@@ -1994,214 +1997,73 @@ def save_start_page_contents(contents):
     userdata["start_page_contents"] = contents
     save_userdata(userdata)
 
-# ==========================================
-# ۴) اصلاح بخش آغازین تابع start (اضافه کردن پشتیبانی از دیپ‌لینک مستقیم file_id بدون تغییر پوشه کاربر)
-# ==========================================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=True)
+
+async def send_start_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if is_user_banned(user_id):
-        await update.message.reply_text(
-            "⛔️ شما از ربات بن شدید و امکان استفاده از ربات را ندارید.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return ConversationHandler.END
     userdata = load_userdata()
     sub_admins = userdata.get("sub_admins", [])
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
-    # پاک‌سازی داده‌های موقتی
-    context.user_data.pop("temp_content", None)
-    context.user_data.pop("change_target", None)
-    context.user_data.pop("current_report_node", None)
+    contents = userdata.get("start_page_contents", [])
 
-    db = load_db()
-    args = context.args  # payload ارسالی استارت
+    if not contents:
+        await update.message.reply_text(
+            DEFAULT_START_TEXT,
+            reply_markup=get_keyboard("root", is_admin),
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        return
 
-    # 🔗 اگر استارت همراه با آرگومان/دیپ‌لینک باشد
-    if args:
-        payload = args[0]
+    first_sent = False
 
-        # ----------------- بخش دیپ‌لینک مستقیم جدید بر اساس file_id -----------------
-        # فرمت لینک جدید: t.me/BotUsername?start=file_FILEID
-        if payload.startswith("file_") and not payload.startswith("file__"):
-            file_id = payload[len("file_"):]
-            
-            # فایل را به صورت مستقیم به کاربر ارسال می‌کنیم (صرفاً خود فایل را بدون نمایش مسیر و تغییر پوشه ارسال می‌کند)
-            chat_id = update.effective_chat.id
-            bot = context.bot
-            
-            # نگه داشتن پوشه فعلی کاربر روی وضعیت قبلی یا تنظیم روی ریشه در صورت عدم وجود
-            if "current_node" not in context.user_data:
-                context.user_data["current_node"] = "root"
-            
-            # متدهای مختلف ارسال فایل در تلگرام را برای file_id بررسی و ارسال می‌کنیم
-            methods = [
-                (bot.send_photo, "photo"),
-                (bot.send_video, "video"),
-                (bot.send_document, "document"),
-                (bot.send_audio, "audio"),
-                (bot.send_voice, "voice"),
-            ]
-            
-            sent_status = False
-            for method, arg_name in methods:
-                try:
-                    kwargs = {arg_name: file_id}
-                    await method(chat_id=chat_id, **kwargs)
-                    sent_status = True
-                    break
-                except Exception:
-                    continue
-            
-            if not sent_status:
-                await update.message.reply_text("❌ امکان ارسال مستقیم این فایل وجود نداشت یا شناسه منقضی شده است.")
-            
-            return CHOOSING
-        # ----------------------------------------------------------------------------
+    for item in contents:
+        try:
+            msg_type = item["type"]
+            saved_entities = item.get("entities")
 
-        node_id = None
-        content_index = None
-
-        # لینک قدیمی: file__{node_id}__{index}
-        if payload.startswith("file__"):
-            parts = payload.split("__", 2)
-            if len(parts) == 3:
-                _, node_id, index_str = parts
-                try:
-                    content_index = int(index_str)
-                except ValueError:
-                    node_id = None
-                    content_index = None
-
-        # لینک کمکی: file_{node_id}_{index}
-        elif payload.startswith("file_"):
-            raw = payload[len("file_"):]
-            try:
-                node_id, index_str = raw.rsplit("_", 1)
-                content_index = int(index_str)
-            except ValueError:
-                node_id = None
-                content_index = None
-
-        if node_id is not None and content_index is not None:
-            if node_id in db:
-                contents = db[node_id].get("contents", [])
-                if 0 <= content_index < len(contents):
-                    bot_username = context.bot.username
-                    path_text = get_node_path_html(db, node_id, bot_username)
-
-                    current_node = context.user_data.get("current_node", "root")
-
-                    await update.message.reply_text(
-                        f"📂 مسیر فایل:\n{path_text}",
-                        reply_markup=get_keyboard(current_node, is_admin),
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
+            if msg_type == "text":
+                kwargs = {"disable_web_page_preview": True}
+                if saved_entities is not None:
+                    kwargs["entities"] = saved_entities
+                    sent = await update.message.reply_text(
+                        text=item["text"],
+                        **kwargs
                     )
+                else:
+                    kwargs["parse_mode"] = "HTML"
+                    sent = await update.message.reply_text(
+                        text=item["text"],
+                        **kwargs
+                    )
+            else:
+                file_id = item["file_id"]
+                caption = item.get("caption", "")
+                send_args = {"caption": caption}
 
-                    item = contents[content_index]
-                    try:
-                        msg_type = item["type"]
-                        saved_entities = item.get("entities")
+                if saved_entities is not None:
+                    send_args["caption_entities"] = saved_entities
+                else:
+                    send_args["parse_mode"] = "HTML"
 
-                        if msg_type == "text":
-                            if saved_entities is not None:
-                                await update.message.reply_text(
-                                    text=item["text"],
-                                    entities=saved_entities
-                                )
-                            else:
-                                await update.message.reply_text(
-                                    text=item["text"],
-                                    parse_mode="HTML"
-                                )
-                        else:
-                            file_id = item["file_id"]
-                            caption = item.get("caption", "")
+                if msg_type == "photo":
+                    sent = await update.message.reply_photo(photo=file_id, **send_args)
+                elif msg_type == "video":
+                    sent = await update.message.reply_video(video=file_id, **send_args)
+                elif msg_type == "document":
+                    sent = await update.message.reply_document(document=file_id, **send_args)
+                elif msg_type == "audio":
+                    sent = await update.message.reply_audio(audio=file_id, **send_args)
+                elif msg_type == "voice":
+                    sent = await update.message.reply_voice(voice=file_id, **send_args)
+                else:
+                    continue
 
-                            send_args = {"caption": caption}
-                            if saved_entities is not None:
-                                send_args["caption_entities"] = saved_entities
-                            else:
-                                send_args["parse_mode"] = "HTML"
+            if sent and not first_sent:
+                first_sent = True
 
-                            if msg_type == "photo":
-                                await update.message.reply_photo(photo=file_id, **send_args)
-                            elif msg_type == "video":
-                                await update.message.reply_video(video=file_id, **send_args)
-                            elif msg_type == "document":
-                                await update.message.reply_document(document=file_id, **send_args)
-                            elif msg_type == "audio":
-                                await update.message.reply_audio(audio=file_id, **send_args)
-                            elif msg_type == "voice":
-                                await update.message.reply_voice(voice=file_id, **send_args)
-
-                    except Exception as e:
-                        logging.error(f"Error sending deeplink file: {e}")
-                        await update.message.reply_text("❌ خطا در ارسال فایل.")
-
-                    if "current_node" not in context.user_data:
-                        context.user_data["current_node"] = "root"
-
-                    return CHOOSING
-
-            await update.message.reply_text("❌ لینک فایل نامعتبر است.")
-            return CHOOSING
-
-    # 🔗 اگر start با هش/پوشه آمده
-    if args:
-        target_id = args[0]
-
-        if target_id in db:
-            set_report_page(context, target_id)
-            target_node = db[target_id]
-            has_children = bool(target_node.get("children"))
-
-            # 👤 کاربر عادی + نود بدون فرزند => فقط محتوا نمایش بده
-            if not is_admin and not has_children:
-                parent_id = target_node.get("parent") or "root"
-                context.user_data["current_node"] = parent_id
-                bot_username = context.bot.username
-                path_text = get_node_path_html(db, target_id, bot_username)
-
-                await update.message.reply_text(
-                    f"📂 مسیر:\n{path_text}",
-                    reply_markup=get_keyboard(parent_id, is_admin),
-                    parse_mode="HTML",
-                    disable_web_page_preview=True
-                )
-
-                await send_node_contents(update, context, target_id)
-                return CHOOSING
-
-            # 👑 ادمین، یا نودی که فرزند دارد => خود پوشه باز شود
-            context.user_data["current_node"] = target_id
-            bot_username = context.bot.username
-            path_text = get_node_path_html(db, target_id, bot_username)
-
-            await update.message.reply_text(
-                f"📂 مسیر:\n{path_text}",
-                reply_markup=get_keyboard(target_id, is_admin),
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-
-            await send_node_contents(update, context, target_id)
-            return CHOOSING
-
-    # 🏠 start عادی
-    context.user_data["current_node"] = "root"
-    set_report_page(context, "root")
-    
-    await send_start_page(update, context)
-    return CHOOSING
-
-    #if first_sent:
-    #    await update.message.reply_text(
-    #        "🏠 صفحه اصلی",
-    #        reply_markup=get_keyboard("root", is_admin)
-    #    )
+        except Exception as e:
+            logging.error(f"Error sending start page content: {e}")
 
 
 async def receive_start_page_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
