@@ -35,6 +35,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
     ConversationHandler,
+    ApplicationHandlerStop
 )
 
 import copy
