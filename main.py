@@ -1462,13 +1462,13 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     caption = item.get("caption", "")
     caption_escaped = escape(caption) if caption else ""
     
-    # ساخت دستور اختصاصی برای دریافت فایل (بدون محدودیت طول)
-    # ادمین با کلیک روی این کد، آن را کپی کرده و می‌تواند به ربات بفرستد
-    get_command = f"<code>/getfile_{file_id}</code>"
+    # ساخت متن ساده کپی‌شونده بدون پیشوند اسلش (کامند)
+    # ادمین با کلیک، این متن را کپی و به ربات می‌فرستد
+    get_command = f"<code>file-id:{file_id}</code>"
     
     log_text = (
         f"📎 <b>فایل {index} ({msg_type})</b>\n"
-        f"📥 دستور دریافت مستقیم:\n{get_command}\n"
+        f"📥 متن دریافت مستقیم:\n{get_command}\n"
         f"🔑 شناسه خام فایل:\n<code>{file_id}</code>\n"
     )
     
@@ -1479,14 +1479,14 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
 
 async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    هندلری برای پیام‌هایی که با /getfile_ شروع می‌شوند.
-    این دستور خارج از سیستم استارت و دیپ‌لینک عمل می‌کند.
+    هندلری برای پیام‌هایی که حاوی شناسه فایل با پیشوند file-id: هستند.
+    این پیام‌ها متنی ساده بوده و از فیلترهای کامند عبور می‌کنند.
     """
     text = update.message.text
-    if not text or not text.startswith("/getfile_"):
+    if not text or not text.startswith("file-id:"):
         return
     
-    file_id = text[len("/getfile_"):]
+    file_id = text[len("file-id:"):]
     chat_id = update.effective_chat.id
     bot = context.bot
     
@@ -3176,6 +3176,11 @@ def find_nearest_valid_node(db, target_node_id):
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, count_message=True)
     text = update.message.text
+
+    # 🛑 اگر پیام مربوط به دریافت مستقیم فایل بود، پردازش ناوبری را متوقف کن
+    if text and text.startswith("file-id:"):
+        return CHOOSING
+
     user_id = update.effective_user.id
     if is_user_banned(user_id):
         await update.message.reply_text(
@@ -4685,11 +4690,12 @@ def build_application():
         group=0
     )
 
+    # هندلر جدید برای دریافت مستقیم فایل با ساختار متنی ساده
     application.add_handler(
-        MessageHandler(filters.Regex(r"^/getfile_"), handle_direct_getfile),
+        MessageHandler(filters.Regex(r"^file-id:"), handle_direct_getfile),
         group=0
     )
-
+    
     # ادیت پیام
     application.add_handler(
         MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edit),
