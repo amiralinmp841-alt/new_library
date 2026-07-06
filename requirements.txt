@@ -5,3 +5,6 @@ requests
 aiohttp==3.9.5
 telethon
 rapidfuzz
+sentence-transformers
+scikit-learn
+numpy
