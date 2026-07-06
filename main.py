@@ -4145,7 +4145,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = context.user_data.get("current_node", "root")
         await update.message.reply_text(
             "📁 پوشه دلخواه\n"
-            "<blockquote expandable>جهت حذف هر کدام از فایل‌ها، همینجا روی آن فایل ری اکت 👎 بزنین.\n\n
+            "<blockquote expandable>جهت حذف هر کدام از فایل‌ها، همینجا روی آن فایل ری اکت 👎 بزنین.\n\n"
             " جهت حذف همه محتوای صفحه و پنهان شدن آیکون پوشه دلخواه، دستور /clear را بزنید!\n\n"
             "⚙️ جهت خاموش کردن پوشه دلخواه، از دستور /on_off_favorite استفاده‌نمایید</blockquote>",
             parse_mode="HTML",
