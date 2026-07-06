@@ -1071,7 +1071,7 @@ def get_keyboard(node_id, is_admin, user_id=None):
         favorites_disabled = users.get(str(user_id), {}).get("favorites_disabled", False)
         if favorites_disabled:
             return
-        if favorites
+        if favorites:
             favorite_btn = KeyboardButton(
                 text="📁 پوشه دلخواه",
                 api_kwargs={"style": "primary"}
