@@ -784,61 +784,55 @@ from telegram.ext import ContextTypes
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         print("REACTION UPDATE:", update.to_dict())
-    except Exception as e:
-        print("to_dict failed:", e)
+    except:
+        pass
 
     reaction = update.message_reaction
     if not reaction:
-        print("No message_reaction")
+        print("NO message_reaction")
         return
 
     user_id = reaction.user.id if reaction.user else None
     chat_id = reaction.chat.id
     msg_id = reaction.message_id
 
-    if not user_id:
-        print("No user_id for reaction")
-        return
+    print("REACTION FROM:", user_id, "ON MSG:", msg_id)
 
-    print("reaction user_id:", user_id)
-    print("reaction chat_id:", chat_id)
-    print("reaction msg_id:", msg_id)
+    # ⛔️ تغییر اصلی: استفاده از همان مپینگ دیپ‌لینک
+    sent_mapping = context.user_data.get("sent_mapping", {})
+    meta = sent_mapping.get(msg_id)
 
-    meta = get_reaction_mapping(chat_id, msg_id)
-    print("reaction meta:", meta)
+    print("META:", meta)
 
     if not meta:
-        print("No meta found for this reaction message")
+        print("NO META FOUND IN sent_mapping")
         return
 
     node_id = meta.get("node_id")
     content_index = meta.get("content_index")
 
     if node_id is None or content_index is None:
-        print("Reaction meta is incomplete")
+        print("Meta incomplete.")
         return
 
     try:
         idx = int(content_index)
-    except (TypeError, ValueError):
-        print("Invalid reaction content_index:", content_index)
+    except:
+        print("Invalid content_index:", content_index)
         return
 
     db = load_db()
-    if node_id not in db or "contents" not in db[node_id]:
-        print("Reaction target node not found in db:", node_id)
+    if node_id not in db:
+        print("Node not in db:", node_id)
         return
 
     contents = db[node_id].get("contents", [])
     if not (0 <= idx < len(contents)):
-        print("Reaction target content index not found:", node_id, idx)
+        print("content index out of range")
         return
 
-    new_emojis = [r.emoji for r in reaction.new_reaction if hasattr(r, "emoji")]
-    old_emojis = [r.emoji for r in reaction.old_reaction if hasattr(r, "emoji")]
-
-    print("old emojis:", old_emojis)
-    print("new emojis:", new_emojis)
+    new_emojis = [r.emoji for r in reaction.new_reaction]
+    old_emojis = [r.emoji for r in reaction.old_reaction]
 
     HEARTS = {"❤", "❤️"}
     DISLIKES = {"👎"}
@@ -851,27 +845,29 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if add_to_favorites(user_id, node_id, idx):
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="✅ به پوشه دلخواه اضافه شد.",
-                reply_to_message_id=msg_id
+                reply_to_message_id=msg_id,
+                text="✅ به پوشه دلخواه اضافه شد."
             )
-        else:
-            print("Already in favorites")
+        return
 
-    elif removed_heart:
+    if removed_heart:
         if remove_from_favorites(user_id, node_id, idx):
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="🗑 از پوشه دلخواه حذف شد.",
-                reply_to_message_id=msg_id
+                reply_to_message_id=msg_id,
+                text="🗑 از پوشه دلخواه حذف شد."
             )
+        return
 
-    elif added_dislike:
+    if added_dislike:
         if remove_from_favorites(user_id, node_id, idx):
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="🗑 حذف شد.",
-                reply_to_message_id=msg_id
+                reply_to_message_id=msg_id,
+                text="🗑 حذف شد."
             )
+        return
+
 
 
 async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
