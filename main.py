@@ -3902,7 +3902,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current = context.user_data.get("current_node", "root")
     
             await update.message.reply_text("✅ رمز تایید شد.\nشما اکنون ادمین هستید 😎",
-                reply_markup=get_keyboard(current, true, user_id=user_id) 
+                reply_markup=get_keyboard(current, True, user_id=user_id) 
                 )
     
             # اطلاع به ادمین‌ها
@@ -4817,7 +4817,7 @@ async def add_sub_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=new_admin,
                 text="🎉 شما به عنوان ادمین فرعی ربات منصوب شدید.",
-                reply_markup=get_keyboard(current, true, user_id=user_id) 
+                reply_markup=get_keyboard(current, True, user_id=user_id) 
             )
         except Exception as e:
             print("Failed to notify new admin:", e)
