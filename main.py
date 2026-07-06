@@ -2137,17 +2137,23 @@ async def handle_reply_delete(update: Update, context: ContextTypes.DEFAULT_TYPE
     mapping = context.user_data.get("sent_mapping", {}).get(target_msg_id)
 
     if not mapping:
-        await msg.reply_text("⚠️ این فایل در حافظه موقت ربات پیدا نشد یا مربوط به پوشه دیگری است.")
-        return
-
-    current_node = context.user_data.get("current_node", "root")
-    if mapping["node_id"] != current_node:
-        await msg.reply_text("⚠️ شما فقط می‌توانید فایل‌های مربوط به پوشه فعلی خود را حذف کنید.")
+        await msg.reply_text("⚠️ این فایل در حافظه موقت ربات پیدا نشد.")
         return
 
     db = load_db()
-    node_id = mapping["node_id"]
-    idx = mapping["content_index"]
+    node_id = mapping.get("node_id")
+    idx = mapping.get("content_index")
+    
+    if node_id is None or idx is None:
+        await msg.reply_text("⚠️ اطلاعات این فایل در حافظه موقت ناقص است.")
+        return
+    
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        await msg.reply_text("⚠️ اطلاعات این فایل در حافظه موقت نامعتبر است.")
+        return
+    
 
     if node_id not in db or "contents" not in db[node_id]:
         await msg.reply_text("⚠️ خطا در دسترسی به اطلاعات فایل در دیتابیس.")
@@ -2250,17 +2256,23 @@ async def handle_reply_change(update: Update, context: ContextTypes.DEFAULT_TYPE
     mapping = context.user_data.get("sent_mapping", {}).get(target_msg_id)
 
     if not mapping:
-        await msg.reply_text("⚠️ این فایل در حافظه موقت ربات پیدا نشد یا مربوط به پوشه دیگری است.")
-        return
-
-    current_node = context.user_data.get("current_node", "root")
-    if mapping["node_id"] != current_node:
-        await msg.reply_text("⚠️ شما فقط می‌توانید فایل‌های مربوط به پوشه فعلی خود را تغییر دهید.")
+        await msg.reply_text("⚠️ این فایل در حافظه موقت ربات پیدا نشد.")
         return
 
     db = load_db()
-    node_id = mapping["node_id"]
-    idx = mapping["content_index"]
+    node_id = mapping.get("node_id")
+    idx = mapping.get("content_index")
+    
+    if node_id is None or idx is None:
+        await msg.reply_text("⚠️ اطلاعات این فایل در حافظه موقت ناقص است.")
+        return CHOOSING
+    
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        await msg.reply_text("⚠️ اطلاعات این فایل در حافظه موقت نامعتبر است.")
+        return CHOOSING
+    
 
     replace_start = idx
     replace_count = 1
