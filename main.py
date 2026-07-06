@@ -963,7 +963,6 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-
 async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     userdata = load_userdata()
@@ -4824,6 +4823,8 @@ async def add_sub_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         context.user_data["admin_panel"] = "admin_mgmt"
+        current=context.user_data.get("current_node", "root")
+        user_id=update.effective_user.id
         
         # 📩 ارسال پیام به ادمین جدید
         try:
@@ -4893,13 +4894,15 @@ async def remove_sub_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         context.user_data["admin_panel"] = "admin_mgmt"
+        current=context.user_data.get("current_node", "root")
+        user_id=update.effective_user.id
         
         # 📩 ارسال پیام به کاربر حذف‌شده
         try:
             await context.bot.send_message(
                 chat_id=admin_id,
                 text="⚠️ شما از لیست ادمین‌های ربات حذف شدید.",
-                reply_markup=get_keyboard("root", false, user_id=user_id) 
+                reply_markup=get_keyboard("root", False, user_id=user_id) 
             )
         except Exception as e:
             print("Failed to notify removed admin:", e)
