@@ -40,6 +40,7 @@ from telegram.ext import (
     MessageReactionHandler
 )
 
+import time
 import copy
 from flask import Flask
 import threading
@@ -432,7 +433,7 @@ def save_userdata(data, upload=True):
 
     return True
 
-def track_user_activity(update: Update, count_message=True):
+def track_user_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, count_message=True):
     """
     ثبت اطلاعات کاربران داخل userdata:
     - نام
@@ -440,7 +441,9 @@ def track_user_activity(update: Update, count_message=True):
     - آیدی عددی
     - تعداد پیام‌ها / دستورها
     - وضعیت بن
-    - حفظ سایر تنظیمات مثل smart_search_disabled
+    - حفظ سایر تنظیمات مثل smart_search_disabledو favorites_disabled
+    - ذخیره current_node
+    - ثبت زمان آخرین فعالیت
     """
 
     user = update.effective_user
@@ -473,11 +476,15 @@ def track_user_activity(update: Update, count_message=True):
     user_record["banned"] = bool(old_data.get("banned", False))
     user_record["first_seen"] = old_data.get("first_seen") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user_record["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # اگر از قبل وجود نداشت، پیش‌فرض سرچ هوشمند را روشن نگه دار
+    user_record["last_activity_ts"] = int(time.time())
     user_record["smart_search_disabled"] = old_data.get("smart_search_disabled", False)
-    # اگر از قبل وجود نداشت، پوشه دلخواه فعال باشد
     user_record["favorites_disabled"] = old_data.get("favorites_disabled", False)
+
+    current_node = context.user_data.get("current_node")
+    if current_node is not None:
+        user_record["current_node"] = current_node
+    else:
+        user_record["current_node"] = old_data.get("current_node", "root")
 
     users[user_id] = user_record
 
@@ -489,6 +496,66 @@ def track_user_activity(update: Update, count_message=True):
     should_upload = (old_count == 0) or (new_count % 10 == 0)
 
     save_userdata(userdata, upload=should_upload)
+    schedule_inactive_upload(context, user.id)
+
+async def upload_userdata_if_user_inactive(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    user_id = str(job.data["user_id"])
+
+    userdata = load_userdata()
+    user_record = userdata.get("users", {}).get(user_id, {})
+    last_activity_ts = int(user_record.get("last_activity_ts", 0))
+    now_ts = int(time.time())
+
+    if now_ts - last_activity_ts >= 60:
+        print(f"📤 User {user_id} inactive for 60 seconds. Uploading userdata...")
+        save_userdata(userdata, upload=True)
+
+def schedule_inactive_upload(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    if context.job_queue is None:
+        return
+
+    job_name = f"inactive_upload_{user_id}"
+
+    for job in context.job_queue.get_jobs_by_name(job_name):
+        job.schedule_removal()
+
+    context.job_queue.run_once(
+        upload_userdata_if_user_inactive,
+        when=60,
+        data={"user_id": user_id},
+        name=job_name
+    )
+
+
+def get_saved_current_node(user_id, default=None):
+    userdata = load_userdata()
+    users = userdata.get("users", {})
+    user_record = users.get(str(user_id), {})
+
+    node_id = user_record.get("current_node", default)
+    if node_id is None:
+        return default
+
+    db = load_db()
+    if node_id not in db:
+        return default
+
+    return node_id
+
+
+async def restore_current_node_if_missing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user:
+        return
+
+    if "current_node" in context.user_data:
+        return
+
+    saved_node = get_saved_current_node(user.id, default=None)
+    if saved_node is not None:
+        context.user_data["current_node"] = saved_node
+
 
 def is_user_banned(user_id: int) -> bool:
     userdata = load_userdata()
@@ -630,27 +697,6 @@ def set_pending_caption(context, caption):
 
 def pop_pending_caption(context):
     return context.user_data.pop("pending_caption", None)
-
-def set_pending_backup_caption(context, caption):
-    context.user_data["pending_backup_caption"] = caption
-
-def pop_pending_backup_caption(context):
-    return context.user_data.pop("pending_backup_caption", None)
-
-def format_backup_caption(admin_user, action_type):
-    admin_link = get_admin_link(admin_user)
-    username = f"@{admin_user.username}" if admin_user.username else "بدون یوزرنیم"
-
-    text = (
-        f"👑 <b>بکاپ دیتابیس</b>\n"
-        f"👤 ادمین: {admin_link}\n"
-        f"🆔: <code>{admin_user.id}</code>\n"
-        f"👤 یوزرنیم: {username}\n"
-        f"⚙️ عملیات: <b>{action_type}</b>"
-    )
-
-    # برای اطمینان از محدودیت کپشن فایل تلگرام
-    return text[:1000]
 
 #------ دکمه های رنگی ----------
 async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1357,7 +1403,7 @@ async def send_pending_report(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    track_user_activity(update, context, count_message=False)
 
     user = update.effective_user
     user_id = user.id
@@ -1532,7 +1578,7 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return CHOOSING
 
 async def receive_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    track_user_activity(update, context, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -1552,7 +1598,7 @@ async def receive_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def report_without_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    track_user_activity(update, context, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -1571,7 +1617,7 @@ async def report_without_message(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    track_user_activity(update, context, count_message=False)
 
     clear_pending_report(context)
     await update.message.reply_text("❌ ارسال گزارش لغو شد.")
@@ -1617,7 +1663,7 @@ async def send_single_content_by_item(message, item):
     return None
 
 async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    track_user_activity(update, context, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -1758,7 +1804,7 @@ async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 async def start_chat_with_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    track_user_activity(update, context, count_message=False)
 
     user = update.effective_user
     user_id = user.id
@@ -2041,7 +2087,7 @@ async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TY
     هندلر دریافت مستقیم فایل با متن ساده:
     file-id:FILE_ID
     """
-    track_user_activity(update, count_message=True)
+    track_user_activity(update, context, count_message=True)
     user_id = update.effective_user.id
     if is_user_banned(user_id):
         await update.message.reply_text("⛔️ شما بن شده‌اید.")
@@ -2107,7 +2153,7 @@ async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TY
     raise ApplicationHandlerStop
 
 async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=False)
+    track_user_activity(update, context, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -2598,7 +2644,7 @@ async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     # اگر کاربر در دیتابیس نبود، ابتدا او را ثبت یا داده‌ی پیش‌فرض می‌گذاریم
     if user_id not in users:
         # برای ثبت مشخصات اولیه
-        track_user_activity(update, count_message=False)
+        track_user_activity(update, context, count_message=False)
         userdata = load_userdata()  # بازخوانی دیتای جدید
         users = userdata.get("users", {})
 
@@ -2643,7 +2689,7 @@ async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=True)
+    track_user_activity(update, context, count_message=True)
     user_id = update.effective_user.id
     if is_user_banned(user_id):
         await update.message.reply_text(
@@ -2806,6 +2852,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await send_start_page(update, context)
     return CHOOSING
+
+# ========= خارج کردن پیام start  از هاردکد============
 
 def get_start_page_contents():
     userdata = load_userdata()
@@ -3972,7 +4020,7 @@ def find_nearest_valid_node(db, target_node_id):
     return "root"
 
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, count_message=True)
+    track_user_activity(update, context, count_message=True)
     text = update.message.text
 
     # 🛑 اگر پیام مربوط به دریافت مستقیم فایل بود، پردازش ناوبری را متوقف کن
@@ -4061,6 +4109,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🏠 صفحه اصلی":
         context.user_data['current_node'] = 'root'
         set_report_page(context, "root")
+        track_user_activity(update, context, count_message=False)
         await update.message.reply_text("به صفحه اصلی بازگشتید.", reply_markup=get_keyboard('root', is_admin, user_id=user_id))
         return CHOOSING
     
@@ -4071,6 +4120,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_node = parent if parent else "root"
         context.user_data["current_node"] = target_node
         set_report_page(context, target_node)
+        track_user_activity(update, context, count_message=False)
     
         if target_node == "root":
             return_message = "🏠 خانه"
@@ -4653,6 +4703,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
             # 👑 ادمین یا دکمه دارای فرزند
             context.user_data['current_node'] = child_id
+            track_user_activity(update, context, count_message=False)
     
             await update.message.reply_text(
                 f"📂 {child_node['name']}\n"
@@ -5726,6 +5777,11 @@ def build_application():
         group=0
         )
 
+    application.add_handler(
+        MessageHandler(filters.ALL, restore_current_node_if_missing),
+        group=-2
+    )
+    
     application.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), not_started),
         group=0
