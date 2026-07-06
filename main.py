@@ -896,11 +896,14 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text = "✅ به پوشه دلخواه اضافه شد."
             else:
                 text = f"✅ {affected_count} فایل از این گروه به پوشه دلخواه اضافه شد."
+            
+            current=context.get.user_data("current_node", "root")
 
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
-                text=text
+                text=text,
+                reply_markup=get_keyboard(current, is_admin, user_id=user_id)
             )
         return
 
@@ -3899,7 +3902,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current = context.user_data.get("current_node", "root")
     
             await update.message.reply_text("✅ رمز تایید شد.\nشما اکنون ادمین هستید 😎",
-                reply_markup=get_keyboard(current, is_admin, user_id=user_id) 
+                reply_markup=get_keyboard(current, true, user_id=user_id) 
                 )
     
             # اطلاع به ادمین‌ها
@@ -4813,7 +4816,8 @@ async def add_sub_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=new_admin,
-                text="🎉 شما به عنوان ادمین فرعی ربات منصوب شدید."
+                text="🎉 شما به عنوان ادمین فرعی ربات منصوب شدید.",
+                reply_markup=get_keyboard(current, true, user_id=user_id) 
             )
         except Exception as e:
             print("Failed to notify new admin:", e)
@@ -4881,7 +4885,8 @@ async def remove_sub_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=admin_id,
-                text="⚠️ شما از لیست ادمین‌های ربات حذف شدید."
+                text="⚠️ شما از لیست ادمین‌های ربات حذف شدید.",
+                reply_markup=get_keyboard("root", false, user_id=user_id) 
             )
         except Exception as e:
             print("Failed to notify removed admin:", e)
