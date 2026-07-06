@@ -779,10 +779,21 @@ def clear_all_favorites(user_id):
 
 
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        print("REACTION UPDATE:", update.to_dict())
-    except:
-        pass
+
+    user = update.effective_user
+    user_id = user.id
+
+    if is_user_banned(user_id):
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از این بخش را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return CHOOSING
+    
+    #try:
+    #    print("REACTION UPDATE:", update.to_dict())
+    #except:
+    #    pass
 
     reaction = update.message_reaction
     if not reaction:
@@ -892,26 +903,42 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     affected_count = 0
 
     if added_heart:
+        already_exists = 0
+        added_count = 0
+    
         for item_index, item in matched_items:
             item_type = item.get("type", "text")
             if item_type == "text":
                 continue
-
-            if add_to_favorites(user_id, node_id, item_index):
-                affected_count += 1
-
-        if affected_count > 0:
+    
+            result = add_to_favorites(user_id, node_id, item_index)
+    
+            if result:
+                added_count += 1
+            else:
+                already_exists += 1
+    
+        if added_count > 0 and already_exists == 0:
             if len(matched_items) == 1:
                 text = "✅ به پوشه دلخواه اضافه شد."
             else:
-                text = f"✅ {affected_count} فایل از این گروه به پوشه دلخواه اضافه شد."
-            
-            await context.bot.send_message(
-                chat_id=chat_id,
-                reply_to_message_id=msg_id,
-                text=text,
-                reply_markup=get_keyboard(current, is_admin, user_id=user_id)
-            )
+                text = f"✅ {added_count} فایل از این گروه به پوشه دلخواه اضافه شد."
+    
+        elif added_count == 0 and already_exists > 0:
+            if len(matched_items) == 1:
+                text = "ℹ️ این فایل از قبل به پوشه دلخواه اضافه شده است."
+            else:
+                text = "ℹ️ همه این فایل‌ها از قبل در پوشه دلخواه بودند."
+    
+        else:
+            text = f"⚠️ {added_count} اضافه شد، {already_exists} مورد از قبل وجود داشت."
+    
+        await context.bot.send_message(
+            chat_id=chat_id,
+            reply_to_message_id=msg_id,
+            text=text,
+            reply_markup=get_keyboard(current, is_admin, user_id=user_id)
+        )
         return
 
     if removed_heart:
