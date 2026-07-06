@@ -3765,7 +3765,7 @@ async def receive_unban_user_id(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["admin_panel"] = "users"
     return CHOOSING
 
-async def unban_user_by_id(target_user_id: int, context: ContextTypes.DEFAULT_TYPE):
+async def unban_user_by_id(update: Update, target_user_id: int, context: ContextTypes.DEFAULT_TYPE):
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
     target_key = str(target_user_id)
