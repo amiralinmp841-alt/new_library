@@ -919,7 +919,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     old_emojis = [r.emoji for r in reaction.old_reaction]
 
     HEARTS = {"❤", "❤️"}
-    DISLIKES = {"👎"}
+    DISLIKES = {"👎", "🖕", "💩"}
 
     added_heart = any(e in HEARTS for e in new_emojis) and not any(e in HEARTS for e in old_emojis)
     removed_heart = any(e in HEARTS for e in old_emojis) and not any(e in HEARTS for e in new_emojis)
@@ -3788,7 +3788,7 @@ async def unban_user_by_id(update: Update, target_user_id: int, context: Context
         await context.bot.send_message(
             chat_id=target_user_id,
             text="✅ شما از بن خارج شدید و دوباره می‌توانید از ربات استفاده کنید.",
-            reply_markup=get_keyboard(current, is_admin, user_id=user_id)
+            reply_markup=get_keyboard(current, False, user_id=user_id)
         )
     except Exception as e:
         print("Failed to notify unbanned user:", e)
