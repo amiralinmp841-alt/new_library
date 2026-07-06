@@ -50,6 +50,9 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from smart_search import smart_search
 from html import escape
+from telegram.ext import MessageReactionHandler
+from telegram import MessageReactionUpdated
+
 
 def delete_node_recursive(db, node_id):
     # اگر نود وجود نداشت
@@ -774,12 +777,6 @@ def clear_all_favorites(user_id):
         user_record["favorites"] = []
         save_userdata(userdata, upload=True) # ذخیره و آپلود نهایی
 
-from telegram.ext import MessageReactionHandler
-from telegram import MessageReactionUpdated
-
-import json
-from telegram import Update
-from telegram.ext import ContextTypes
 
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -5492,6 +5489,7 @@ def build_application():
     application.add_handler(CommandHandler("blue", set_node_style), group=0)
     application.add_handler(CommandHandler("red", set_node_style), group=0)
     application.add_handler(CommandHandler("none", set_node_style), group=0)
+    application.add_handler(CommandHandler("clear", clear_favorites_cmd), group=0)
     application.add_handler(CommandHandler("on_of_search", toggle_smart_search), group=0)
     application.add_handler(
         MessageReactionHandler(
@@ -5522,6 +5520,7 @@ def build_application():
                 CommandHandler("file_id", file_id_command), # 👈 اضافه شدن کامند جدید به منو
                 CommandHandler("change", handle_reply_change),
                 CommandHandler("del", handle_reply_delete),
+                CommandHandler("clear", clear_favorites_cmd),
 
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
@@ -5614,6 +5613,7 @@ def build_application():
             CommandHandler("change", handle_reply_change),
             CommandHandler("del", handle_reply_delete),
             CommandHandler("cansel", cancel_report),
+            CommandHandler("clear", clear_favorites_cmd),
         ],
         allow_reentry=True,
     )
