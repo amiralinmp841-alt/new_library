@@ -3151,7 +3151,7 @@ async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ---------------- انتخاب کاربر برای خارج کردن از بن ----------------
     if data.startswith("admin_unban_pick_"):
         target_user_id = int(data.split("_")[-1])
-        ok, message = await unban_user_by_id(target_user_id, context)
+        ok, message = await unban_user_by_id(update, target_user_id, context)
     
         await query.message.reply_text(
             message,
@@ -3745,7 +3745,7 @@ async def receive_unban_user_id(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ فقط آیدی عددی معتبر بفرستید یا روی دکمه‌های اینلاین بزنید.")
         return WAITING_UNBAN_USER
 
-    ok, message = await unban_user_by_id(target_user_id, context)
+    ok, message = await unban_user_by_id(update, target_user_id, context)
 
     await update.message.reply_text(
         message,
