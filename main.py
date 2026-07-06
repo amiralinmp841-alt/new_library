@@ -897,7 +897,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 text = f"✅ {affected_count} فایل از این گروه به پوشه دلخواه اضافه شد."
             
-            current=context.get.user_data("current_node", "root")
+            current=context.user_data.get("current_node", "root")
 
             await context.bot.send_message(
                 chat_id=chat_id,
