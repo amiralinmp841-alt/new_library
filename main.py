@@ -898,6 +898,8 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text = f"✅ {affected_count} فایل از این گروه به پوشه دلخواه اضافه شد."
             
             current=context.user_data.get("current_node", "root")
+            is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
+            user_id=update.effective_user.id
 
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -922,10 +924,15 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 text = f"🗑 {affected_count} فایل از این گروه از پوشه دلخواه حذف شد."
 
+            current=context.user_data.get("current_node", "root")
+            is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
+            user_id=update.effective_user.id
+
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
-                text=text
+                text=text,
+                reply_markup=get_keyboard(current, is_admin, user_id=user_id)
             )
         return
 
@@ -944,10 +951,15 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 text = f"🗑 {affected_count} فایل از این گروه حذف شد."
 
+            current=context.user_data.get("current_node", "root")
+            is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
+            user_id=update.effective_user.id
+
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
-                text=text
+                text=text,
+                reply_markup=get_keyboard(current, is_admin, user_id=user_id)
             )
         return
 
@@ -958,10 +970,11 @@ async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
     is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
 
     clear_all_favorites(user_id)
+    current=context.user_data.get("current_node", "root")
 
     await update.message.reply_text(
         "✅ پوشه دلخواه پاکسازی شد.",
-        reply_markup=get_keyboard("root", is_admin, user_id=user_id)
+        reply_markup=get_keyboard("current", is_admin, user_id=user_id)
     )
     return CHOOSING
 
