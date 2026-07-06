@@ -3927,6 +3927,11 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"🆔 {user_id}\n"
                         f"🔗 @{update.effective_user.username}"
                     )
+        if user_id in ADMIN_IDS:
+            await update.message.reply_text("شما از ادمین‌های اصلی هستید!")
+        if user_id in sub_admins:
+            await update.massage.reply_text("شما قبلا ادمین شده‌اید!")
+
         return CHOOSING
     # --- Check Admin Password --- --- Check Admin Password --- --- Check Admin Password --- --- Check Admin Password --- --- Check Admin Password --- --- Check Admin Password --- 
 
