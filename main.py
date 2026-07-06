@@ -793,6 +793,15 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = reaction.chat.id
     msg_id = reaction.message_id
 
+    userdata = load_userdata()
+    
+    user_info = userdata.get("users", {}).get(str(user_id), {})
+    
+    current = user_info.get("current_node", "root")
+    
+    sub_admins = userdata.get("sub_admins", [])
+    is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
+
     if not user_id:
         print("NO user_id")
         return
@@ -897,10 +906,6 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 text = f"✅ {affected_count} فایل از این گروه به پوشه دلخواه اضافه شد."
             
-            current=context.user_data.get("current_node", "root")
-            is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
-            user_id=update.effective_user.id
-
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
@@ -923,10 +928,6 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text = "🗑 از پوشه دلخواه حذف شد."
             else:
                 text = f"🗑 {affected_count} فایل از این گروه از پوشه دلخواه حذف شد."
-
-            current=context.user_data.get("current_node", "root")
-            is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
-            user_id=update.effective_user.id
 
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -951,10 +952,6 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 text = f"🗑 {affected_count} فایل از این گروه حذف شد."
 
-            current=context.user_data.get("current_node", "root")
-            is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
-            user_id=update.effective_user.id
-
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
@@ -964,16 +961,17 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     userdata = load_userdata()
-    is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
+    sub_admins = userdata.get("sub_admins", [])
+    user_id = update.effective_user.id
+    is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
     clear_all_favorites(user_id)
     current=context.user_data.get("current_node", "root")
 
     await update.message.reply_text(
         "✅ پوشه دلخواه پاکسازی شد.",
-        reply_markup=get_keyboard("current", is_admin, user_id=user_id)
+        reply_markup=get_keyboard(current, is_admin, user_id=user_id)
     )
     return CHOOSING
 
