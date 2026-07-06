@@ -796,40 +796,82 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = reaction.chat.id
     msg_id = reaction.message_id
 
+    if not user_id:
+        print("NO user_id")
+        return
+
     print("REACTION FROM:", user_id, "ON MSG:", msg_id)
 
-    # ⛔️ تغییر اصلی: استفاده از همان مپینگ دیپ‌لینک
+    # دقیقاً مثل deeplink
     sent_mapping = context.user_data.get("sent_mapping", {})
-    meta = sent_mapping.get(msg_id)
+    target = sent_mapping.get(msg_id)
 
-    print("META:", meta)
+    print("META:", target)
 
-    if not meta:
+    if not target:
         print("NO META FOUND IN sent_mapping")
         return
 
-    node_id = meta.get("node_id")
-    content_index = meta.get("content_index")
+    node_id = target.get("node_id")
+    content_index = target.get("content_index")
 
     if node_id is None or content_index is None:
         print("Meta incomplete.")
         return
 
-    try:
-        idx = int(content_index)
-    except:
-        print("Invalid content_index:", content_index)
-        return
-
     db = load_db()
-    if node_id not in db:
-        print("Node not in db:", node_id)
+
+    if node_id not in db or "contents" not in db[node_id]:
+        print("Node/content not found in db")
         return
 
     contents = db[node_id].get("contents", [])
+
+    try:
+        idx = int(content_index)
+    except (TypeError, ValueError):
+        print("Invalid content_index:", content_index)
+        return
+
     if not (0 <= idx < len(contents)):
         print("content index out of range")
         return
+
+    target_item = contents[idx]
+    msg_type = target_item.get("type", "text")
+    media_group_id = target_item.get("media_group_id")
+    groupable_types = {"photo", "video", "document", "audio"}
+
+    matched_items = []
+
+    # دقیقاً مثل deeplink: اگر عضو گروه فایل بود، همه اعضای گروه را پیدا کن
+    if media_group_id and msg_type in groupable_types:
+        start = idx
+        while start > 0:
+            prev_item = contents[start - 1]
+            if (
+                prev_item.get("media_group_id") == media_group_id
+                and prev_item.get("type") in groupable_types
+            ):
+                start -= 1
+            else:
+                break
+
+        end = idx
+        while end + 1 < len(contents):
+            next_item = contents[end + 1]
+            if (
+                next_item.get("media_group_id") == media_group_id
+                and next_item.get("type") in groupable_types
+            ):
+                end += 1
+            else:
+                break
+
+        for i in range(start, end + 1):
+            matched_items.append((i, contents[i]))
+    else:
+        matched_items.append((idx, target_item))
 
     new_emojis = [r.emoji for r in reaction.new_reaction]
     old_emojis = [r.emoji for r in reaction.old_reaction]
@@ -841,33 +883,73 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     removed_heart = any(e in HEARTS for e in old_emojis) and not any(e in HEARTS for e in new_emojis)
     added_dislike = any(e in DISLIKES for e in new_emojis) and not any(e in DISLIKES for e in old_emojis)
 
+    affected_count = 0
+
     if added_heart:
-        if add_to_favorites(user_id, node_id, idx):
+        for item_index, item in matched_items:
+            item_type = item.get("type", "text")
+            if item_type == "text":
+                continue
+
+            if add_to_favorites(user_id, node_id, item_index):
+                affected_count += 1
+
+        if affected_count > 0:
+            if len(matched_items) == 1:
+                text = "✅ به پوشه دلخواه اضافه شد."
+            else:
+                text = f"✅ {affected_count} فایل از این گروه به پوشه دلخواه اضافه شد."
+
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
-                text="✅ به پوشه دلخواه اضافه شد."
+                text=text
             )
         return
 
     if removed_heart:
-        if remove_from_favorites(user_id, node_id, idx):
+        for item_index, item in matched_items:
+            item_type = item.get("type", "text")
+            if item_type == "text":
+                continue
+
+            if remove_from_favorites(user_id, node_id, item_index):
+                affected_count += 1
+
+        if affected_count > 0:
+            if len(matched_items) == 1:
+                text = "🗑 از پوشه دلخواه حذف شد."
+            else:
+                text = f"🗑 {affected_count} فایل از این گروه از پوشه دلخواه حذف شد."
+
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
-                text="🗑 از پوشه دلخواه حذف شد."
+                text=text
             )
         return
 
     if added_dislike:
-        if remove_from_favorites(user_id, node_id, idx):
+        for item_index, item in matched_items:
+            item_type = item.get("type", "text")
+            if item_type == "text":
+                continue
+
+            if remove_from_favorites(user_id, node_id, item_index):
+                affected_count += 1
+
+        if affected_count > 0:
+            if len(matched_items) == 1:
+                text = "🗑 حذف شد."
+            else:
+                text = f"🗑 {affected_count} فایل از این گروه حذف شد."
+
             await context.bot.send_message(
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
-                text="🗑 حذف شد."
+                text=text
             )
         return
-
 
 
 async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -883,25 +965,25 @@ async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     return CHOOSING
 
-def save_reaction_mapping(chat_id, message_id, node_id, content_index):
-    userdata = load_userdata()
-    reaction_map = userdata.setdefault("reaction_map", {})
-
-    key = f"{chat_id}:{message_id}"
-    reaction_map[key] = {
-        "node_id": node_id,
-        "content_index": content_index
-    }
-
-    save_userdata(userdata, upload=False)
-
-
-def get_reaction_mapping(chat_id, message_id):
-    userdata = load_userdata()
-    reaction_map = userdata.get("reaction_map", {})
-
-    key = f"{chat_id}:{message_id}"
-    return reaction_map.get(key)
+#def save_reaction_mapping(chat_id, message_id, node_id, content_index):
+#    userdata = load_userdata()
+#    reaction_map = userdata.setdefault("reaction_map", {})
+#
+#    key = f"{chat_id}:{message_id}"
+#    reaction_map[key] = {
+#        "node_id": node_id,
+#        "content_index": content_index
+#    }
+#
+#    save_userdata(userdata, upload=False)
+#
+#
+#def get_reaction_mapping(chat_id, message_id):
+#    userdata = load_userdata()
+#    reaction_map = userdata.get("reaction_map", {})
+#
+#    key = f"{chat_id}:{message_id}"
+#    return reaction_map.get(key)
 
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
