@@ -965,6 +965,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             reply_to_message_id=msg_id,
             text=text,
+            parse_mode="HTML",
             reply_markup=get_keyboard(current, is_admin, user_id=user_id)
         )
         return
@@ -990,6 +991,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
                 text=text,
+                parse_mode="HTML",
                 reply_markup=get_keyboard(current, is_admin, user_id=user_id)
             )
         return
@@ -1015,6 +1017,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 reply_to_message_id=msg_id,
                 text=text,
+                parse_mode="HTML",
                 reply_markup=get_keyboard(current, is_admin, user_id=user_id)
             )
         return
@@ -1030,7 +1033,8 @@ async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(
         "<blockquote>✅ پوشه دلخواه پاکسازی شد.\n\n ⚙️جهت خاموش کردن پوشه دلخواه، از دستور /on_off_favorite استفاده‌نمایید</blockquote>",
-        reply_markup=get_keyboard(current, is_admin, user_id=user_id)
+        reply_markup=get_keyboard(current, is_admin, user_id=user_id),
+        parse_mode="HTML",
     )
     return CHOOSING
 
