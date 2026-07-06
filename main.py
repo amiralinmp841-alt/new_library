@@ -1029,26 +1029,6 @@ async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     return CHOOSING
 
-#def save_reaction_mapping(chat_id, message_id, node_id, content_index):
-#    userdata = load_userdata()
-#    reaction_map = userdata.setdefault("reaction_map", {})
-#
-#    key = f"{chat_id}:{message_id}"
-#    reaction_map[key] = {
-#        "node_id": node_id,
-#        "content_index": content_index
-#    }
-#
-#    save_userdata(userdata, upload=False)
-#
-#
-#def get_reaction_mapping(chat_id, message_id):
-#    userdata = load_userdata()
-#    reaction_map = userdata.get("reaction_map", {})
-#
-#    key = f"{chat_id}:{message_id}"
-#    return reaction_map.get(key)
-
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
 def get_keyboard(node_id, is_admin, user_id=None):
@@ -1089,7 +1069,9 @@ def get_keyboard(node_id, is_admin, user_id=None):
         users = userdata.get("users", {})
         favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
         favorites_disabled = users.get(str(user_id), {}).get("favorites_disabled", False)
-        if favorites and not favorites_disabled:
+        if favorites_disabled:
+            return
+        if favorites
             favorite_btn = KeyboardButton(
                 text="📁 پوشه دلخواه",
                 api_kwargs={"style": "primary"}
