@@ -780,24 +780,15 @@ def clear_all_favorites(user_id):
 
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user
-    user_id = user.id
-
-    if is_user_banned(user_id):
-        await update.message.reply_text(
-            "⛔️ شما از ربات بن شدید و امکان استفاده از این بخش را ندارید.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return CHOOSING
     
-    #try:
-    #    print("REACTION UPDATE:", update.to_dict())
-    #except:
-    #    pass
+    try:
+        #print("REACTION UPDATE:", update.to_dict())
+    except:
+        pass
 
     reaction = update.message_reaction
     if not reaction:
-        print("NO message_reaction")
+        #print("NO message_reaction")
         return
 
     user_id = reaction.user.id if reaction.user else None
@@ -805,41 +796,44 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_id = reaction.message_id
 
     userdata = load_userdata()
-    
-    user_info = userdata.get("users", {}).get(str(user_id), {})
-    
-    current = user_info.get("current_node", "root")
-    
+    current=context.user_data.get("current_node", "root")
     sub_admins = userdata.get("sub_admins", [])
     is_admin = (user_id in ADMIN_IDS) or (user_id in sub_admins)
 
+    if is_user_banned(user_id):
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از این بخش را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return CHOOSING
+
     if not user_id:
-        print("NO user_id")
+        #print("NO user_id")
         return
 
-    print("REACTION FROM:", user_id, "ON MSG:", msg_id)
+    #print("REACTION FROM:", user_id, "ON MSG:", msg_id)
 
     # دقیقاً مثل deeplink
     sent_mapping = context.user_data.get("sent_mapping", {})
     target = sent_mapping.get(msg_id)
 
-    print("META:", target)
+    #print("META:", target)
 
     if not target:
-        print("NO META FOUND IN sent_mapping")
+        #print("NO META FOUND IN sent_mapping")
         return
 
     node_id = target.get("node_id")
     content_index = target.get("content_index")
 
     if node_id is None or content_index is None:
-        print("Meta incomplete.")
+        #print("Meta incomplete.")
         return
 
     db = load_db()
 
     if node_id not in db or "contents" not in db[node_id]:
-        print("Node/content not found in db")
+        #print("Node/content not found in db")
         return
 
     contents = db[node_id].get("contents", [])
@@ -847,11 +841,11 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         idx = int(content_index)
     except (TypeError, ValueError):
-        print("Invalid content_index:", content_index)
+        #print("Invalid content_index:", content_index)
         return
 
     if not (0 <= idx < len(contents)):
-        print("content index out of range")
+        #print("content index out of range")
         return
 
     target_item = contents[idx]
