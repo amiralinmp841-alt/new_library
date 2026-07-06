@@ -782,7 +782,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     
     try:
-        #print("REACTION UPDATE:", update.to_dict())
+        print("REACTION UPDATE:", update.to_dict())
     except:
         pass
 
