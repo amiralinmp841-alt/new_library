@@ -742,7 +742,7 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 # ========= reactions ===============
-async def on_of_favorite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def on_off_favorite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     userdata = load_userdata()
@@ -1067,10 +1067,11 @@ def get_keyboard(node_id, is_admin, user_id=None):
     if user_id:
         userdata = load_userdata()
         users = userdata.get("users", {})
-        favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
         favorites_disabled = users.get(str(user_id), {}).get("favorites_disabled", False)
         if favorites_disabled:
-            return
+            favorites = []
+        else:
+            favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
         if favorites:
             favorite_btn = KeyboardButton(
                 text="📁 پوشه دلخواه",
@@ -2501,7 +2502,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
     help_text = (
-        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_of_search استفاده کنید."
+        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
     )
 
     if not results:
@@ -4093,7 +4094,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
         favorites_disabled = users.get(str(user_id), {}).get("favorites_disabled", False)
         if favorites_disabled:
-            await update.message.reply_text("❌ شما پوشه دلخواه را غیرفعال کرده‌اید.\n\n⚙️ جهت فعال کردن آن، از دستور /on_of_favorite، استفاده کنید.")
+            await update.message.reply_text("❌ شما پوشه دلخواه را غیرفعال کرده‌اید.\n\n⚙️ جهت فعال کردن آن، از دستور /on_off_favorite، استفاده کنید.")
             return
         
         if not favorites:
@@ -4630,7 +4631,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ## اگر سرچ خاموش باشد، پاسخی ارسال نمی‌شود یا می‌توانید یک پیام ساده دهید:
         #await update.message.reply_text(
         #    "⚠️ سرچ هوشمند برای شما غیرفعال است.\n"
-        #    "برای فعال کردن مجدد آن از دستور /on_of_search استفاده کنید."
+        #    "برای فعال کردن مجدد آن از دستور /on_off_search استفاده کنید."
         #)
         return CHOOSING
 
@@ -5673,8 +5674,8 @@ def build_application():
     application.add_handler(CommandHandler("red", set_node_style), group=0)
     application.add_handler(CommandHandler("none", set_node_style), group=0)
     application.add_handler(CommandHandler("clear", clear_favorites_cmd), group=0)
-    application.add_handler(CommandHandler("on_of_favorite", on_of_favorite))
-    application.add_handler(CommandHandler("on_of_search", toggle_smart_search), group=0)
+    application.add_handler(CommandHandler("on_off_favorite", on_off_favorite))
+    application.add_handler(CommandHandler("on_off_search", toggle_smart_search), group=0)
     
     application.add_handler(
         MessageReactionHandler(handle_reaction, message_reaction_types=MessageReactionHandler.MESSAGE_REACTION), 
