@@ -3896,8 +3896,11 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id not in ADMIN_IDS and user_id not in userdata.get("sub_admins", []):
             userdata.setdefault("sub_admins", []).append(user_id)
             save_userdata(userdata)
+            current = context.user_data.get("current_node", "root")
     
-            await update.message.reply_text("✅ رمز تایید شد.\nشما اکنون ادمین هستید 😎")
+            await update.message.reply_text("✅ رمز تایید شد.\nشما اکنون ادمین هستید 😎",
+                reply_markup=get_keyboard(current, is_admin, user_id=eser_id) 
+                )
     
             # اطلاع به ادمین‌ها
             for aid in ADMIN_IDS:
@@ -4029,11 +4032,12 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not favorites:
             await update.message.reply_text("پوشه دلخواه شما خالی است.")
             return CHOOSING
-
+        current = context.user_data.get("current_node", "root")
         await update.message.reply_text(
             "📁 پوشه دلخواه\n"
             "جهت حذف هر کدام از فایل ها، همینجا روی آن فایل ری اکت 👎 بزنین.\n"
-            "جهت حذف همه محتوای صفحه و پنهان شدن آیکون پوشه دلخواه، دستور /clear را بزنید!"
+            "جهت حذف همه محتوای صفحه و پنهان شدن آیکون پوشه دلخواه، دستور /clear را بزنید!",
+            reply_markup=get_keyboard(current, is_admin, user_id=user_id)
         )
 
         # ========= ارسال پوشه دلخواه با پشتیبانی کامل آلبوم =========
