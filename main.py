@@ -3899,7 +3899,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current = context.user_data.get("current_node", "root")
     
             await update.message.reply_text("✅ رمز تایید شد.\nشما اکنون ادمین هستید 😎",
-                reply_markup=get_keyboard(current, is_admin, user_id=ueser_id) 
+                reply_markup=get_keyboard(current, is_admin, user_id=user_id) 
                 )
     
             # اطلاع به ادمین‌ها
