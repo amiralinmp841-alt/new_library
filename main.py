@@ -440,7 +440,7 @@ def track_user_activity(update: Update, count_message=True):
     - آیدی عددی
     - تعداد پیام‌ها / دستورها
     - وضعیت بن
-    - حفظ سایر تنظیمات مثل smart_search_disabled
+    - حفظ سایر تنظیمات مثل smart_search_disabled / favorites_disabled / search_mode
     """
 
     user = update.effective_user
@@ -474,10 +474,12 @@ def track_user_activity(update: Update, count_message=True):
     user_record["first_seen"] = old_data.get("first_seen") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user_record["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # اگر از قبل وجود نداشت، پیش‌فرض سرچ هوشمند را روشن نگه دار
+    # تنظیمات قابل حفظ
     user_record["smart_search_disabled"] = old_data.get("smart_search_disabled", False)
-    # اگر از قبل وجود نداشت، پوشه دلخواه فعال باشد
     user_record["favorites_disabled"] = old_data.get("favorites_disabled", False)
+
+    # ✅ دیفالت سرچ مود: جنرال
+    user_record["search_mode"] = old_data.get("search_mode", "root")
 
     users[user_id] = user_record
 
@@ -2700,7 +2702,7 @@ async def handle_reply_change(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     return WAITING_CONTENT
 
-
+# ======= سرچ هوشمند ======= # # ======= سرچ هوشمند ======= # # ======= سرچ هوشمند ======= #
 def get_subtree_db(db, root_node_id):
     subtree = {}
 
@@ -2735,101 +2737,88 @@ def get_subtree_db(db, root_node_id):
     add_node_recursive(root_node_id)
     return subtree
 
-#async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
-#    full_db = load_db()
-#    current_node = context.user_data.get("current_node", "root")
-#    
-#    # محدود کردن جستجو فقط به زیرشاخه فعلی
-#    subtree_db = get_subtree_db(full_db, current_node)
-#    
-#    # جستجو در زیرشاخه
-#    results = smart_search(subtree_db, text, limit=5, min_score=45)
-#
-#    help_text = (
-#        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
-#    )
-#
-#    if not results:
-#        await update.message.reply_text(
-#            f"""🔍 نتیجه‌ای در این پوشه یافت نشد.
-#        
-#        ⚠️ توجه!
-#        فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
-#        برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
-#        
-#        {help_text}""",
-#            parse_mode="HTML"
-#        )
-#        return CHOOSING
-#
-#    bot_username = context.bot.username
-#    msg = "🔍 نتایج یافت شده در این پوشه:\n\n"
-#
-#    for item in results:
-#        node_id = item["node_id"]
-#        # دریافت مسیر کامل از دیتابیس اصلی
-#        path_text = get_node_path_text(full_db, node_id)
-#        
-#        # ساخت دیپ‌لینک
-#        deep_link = f"https://t.me/{bot_username}?start={node_id}"
-#        
-#        # فرمت‌دهی با لینک HTML (قابل کلیک)
-#        msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
-#        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
-#
-#    msg += " 🪄 روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید. \n"
-#    msg += help_text
-#
-#    await update.message.reply_text(
-#        msg, 
-#        parse_mode="HTML", 
-#        disable_web_page_preview=True
-#    )
-#
-#    return CHOOSING
-
-
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
+
+    user = update.effective_user
+    if not user:
+        return CHOOSING
+
+    user_id = str(user.id)
     current_node = context.user_data.get("current_node", "root")
 
-    # محدود کردن جستجو فقط به زیرشاخه فعلی
-    subtree_db = get_subtree_db(full_db, current_node)
+    userdata = load_userdata()
+    users = userdata.setdefault("users", {})
 
-    # جستجو در زیرشاخه
+    # اگر کاربر در userdata نبود، ثبت اولیه شود
+    if user_id not in users:
+        track_user_activity(update, count_message=False)
+        userdata = load_userdata()
+        users = userdata.setdefault("users", {})
+
+    # دیفالت = root
+    search_mode = users.get(user_id, {}).get("search_mode", "root")
+
+    # تعیین محدوده جستجو
+    if search_mode == "current_node":
+        search_root = current_node
+        mode_title = "Current Folder Search"
+        mode_desc = "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شد."
+    else:
+        search_root = "root"
+        mode_title = "General Search"
+        mode_desc = "جستجو در کل کتابخانه انجام شد."
+
+    subtree_db = get_subtree_db(full_db, search_root)
+
+    # جستجو
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
     help_text = (
+        "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
         "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
     )
 
     if not results:
-        await update.message.reply_text(
-            f"""🔍 نتیجه‌ای در این پوشه یافت نشد.
-        
-⚠️ توجه!
-فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
-برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
+        if search_mode == "current_node":
+            not_found_text = (
+                "🔍 نتیجه‌ای در <b>Current Folder Search</b> یافت نشد.\n\n"
+                "⚠️ توجه!\n"
+                "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شده است.\n"
+                "اگر می‌خواهید در کل کتابخانه جستجو شود، /search_mode را بزنید."
+            )
+        else:
+            not_found_text = (
+                "🔍 نتیجه‌ای در <b>General Search</b> یافت نشد.\n\n"
+                "جستجو در کل کتابخانه انجام شد اما نتیجه‌ای پیدا نشد."
+            )
 
-{help_text}""",
+        await update.message.reply_text(
+            f"{not_found_text}\n\n{help_text}",
             parse_mode="HTML"
         )
         return CHOOSING
 
     bot_username = context.bot.username
-    msg = "🔍 نتایج یافت شده در این پوشه:\n\n"
+
+    msg = (
+        f"🔎 <b>{mode_title}</b>\n"
+        f"{mode_desc}\n\n"
+        f"🔍 نتایج یافت شده:\n\n"
+    )
 
     for item in results:
         node_id = item["node_id"]
 
-        # مسیر لینک‌دار؛ هر بخش از مسیر، لینک خودِ همان پوشه را دارد
         path_html = get_node_path_html(full_db, node_id, bot_username)
 
         msg += f"📂 {path_html}\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
-    msg += "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n"
-    msg += help_text
+    msg += (
+        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n\n"
+        f"{help_text}"
+    )
 
     await update.message.reply_text(
         msg,
@@ -2839,6 +2828,61 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     return CHOOSING
 
+def get_search_root_by_mode(context, search_mode: str) -> str:
+    if search_mode == "current_node":
+        return context.user_data.get("current_node", "root")
+    return "root"
+
+async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user:
+        return CHOOSING
+
+    user_id = str(user.id)
+    userdata = load_userdata()
+    users = userdata.setdefault("users", {})
+
+    # اطمینان از ثبت کاربر در سیستم
+    if user_id not in users:
+        track_user_activity(update, count_message=False)
+        userdata = load_userdata()
+        users = userdata.setdefault("users", {})
+
+    # سوییچ کردن بین دو حالت root و current_node
+    old_mode = users.get(user_id, {}).get("search_mode", "root")
+    new_mode = "current_node" if old_mode == "root" else "root"
+
+    users[user_id]["search_mode"] = new_mode
+
+    # 💡 ذخیره تغییرات و آپلود فوری فایل در تلگرام
+    save_userdata(userdata, upload=True)
+
+    if new_mode == "root":
+        await update.message.reply_text(
+            "🌍 حالت جستجو به <b>«کل کتابخانه (General Search)»</b> تغییر یافت.\n"
+            "از این پس عبارات شما در تمام پوشه‌ها جستجو خواهند شد.",
+            parse_mode="HTML"
+        )
+    else:
+        current_node = context.user_data.get("current_node", "root")
+        if current_node == "root":
+            await update.message.reply_text(
+                "📂 حالت جستجو به <b>«پوشه فعلی (Current Folder Search)»</b> تغییر یافت.\n"
+                "⚠️ چون در حال حاضر در پوشه اصلی (Root) هستید، جستجو همچنان در کل کتابخانه انجام می‌شود.",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text(
+                "📂 حالت جستجو به <b>«پوشه فعلی (Current Folder Search)»</b> تغییر یافت.\n"
+                "از این پس نتایج فقط از پوشه فعلی و زیرشاخه‌های آن استخراج می‌شوند.",
+                parse_mode="HTML"
+            )
+
+    return CHOOSING
+
+def get_user_search_mode(user_id: int) -> str:
+    userdata = load_userdata()
+    return userdata.get("users", {}).get(str(user_id), {}).get("search_mode", "root")
 
 async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -6012,6 +6056,7 @@ def build_application():
                 CommandHandler("file_id", file_id_command), # 👈 اضافه شدن کامند جدید به منو
                 CommandHandler("change", handle_reply_change),
                 CommandHandler("del", handle_reply_delete),
+                CommandHandler("search_mode", toggle_search_mode),
                 #CommandHandler("style", set_custom_layout), 
                 #CommandHandler("clear", clear_favorites_cmd),
 
