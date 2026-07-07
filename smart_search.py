@@ -6,7 +6,7 @@ import numpy as np
 
 # مدل فقط یک بار هنگام اجرای ربات لود می‌شود
 embedding_model = SentenceTransformer(
-    "paraphrase-multilingual-MiniLM-L3-v2"
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L6-v2"
 )
 
 def normalize_text(text: str) -> str:
