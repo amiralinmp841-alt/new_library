@@ -2771,11 +2771,19 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     subtree_db = get_subtree_db(full_db, search_root)
 
     # جستجو
-    results = smart_search(subtree_db, text, limit=5, min_score=45)
+    results = smart_search(subtree_db, text, limit=15, min_score=45)
 
-    help_text = (
+    help_block = (
+        "<blockquote>"
         "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
         "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
+        "</blockquote>"
+    )
+
+    path_hint_block = (
+        "<blockquote>"
+        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید."
+        "</blockquote>"
     )
 
     if not results:
@@ -2793,8 +2801,9 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
 
         await update.message.reply_text(
-            f"{not_found_text}\n\n{help_text}",
-            parse_mode="HTML"
+            f"{not_found_text}\n\n{help_block}",
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
         return CHOOSING
 
@@ -2806,18 +2815,30 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"🔍 نتایج یافت شده:\n\n"
     )
 
-    for item in results:
+    # 5 نتیجه اول
+    first_results = results[:5]
+    more_results = results[5:]
+
+    for item in first_results:
         node_id = item["node_id"]
-
         path_html = get_node_path_html(full_db, node_id, bot_username)
-
         msg += f"📂 {path_html}\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
-    msg += (
-        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n\n"
-        f"{help_text}"
-    )
+    # نتایج بیشتر
+    if more_results:
+        more_block = "<blockquote expandable>\n📋 نتایج بیشتر:\n\n"
+
+        for item in more_results:
+            node_id = item["node_id"]
+            path_html = get_node_path_html(full_db, node_id, bot_username)
+            more_block += f"📂 {path_html}\n"
+            more_block += f"درصد تطابق: {int(item['score'])}٪\n\n"
+
+        more_block += "</blockquote>"
+        msg += more_block + "\n\n"
+
+    msg += path_hint_block + "\n\n" + help_block
 
     await update.message.reply_text(
         msg,
@@ -2826,6 +2847,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     return CHOOSING
+
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
