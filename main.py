@@ -39,7 +39,7 @@ from telegram.ext import (
     ApplicationHandlerStop,
     MessageReactionHandler
 )
-import re
+
 import copy
 from flask import Flask
 import threading
@@ -2736,90 +2736,6 @@ def get_subtree_db(db, root_node_id):
     add_node_recursive(root_node_id)
     return subtree
 
-
-def strip_html_tags(text):
-    """
-    حذف تمامی تگ‌های HTML مانند <b>, <i>, <u>, <a> و غیره برای جلوگیری از تداخل ساختاری
-    """
-    if not text:
-        return ""
-    clean = re.compile('<.*?>')
-    return re.sub(clean, '', text)
-
-def get_search_result_title(full_db, node_id, content_index):
-    """
-    عنوان مناسب برای نمایش نتیجه جستجو را مستقیم از دیتابیس می‌سازد.
-    - برای text: فقط تعداد محدودی از اول متن را برمی‌گرداند
-    - برای فایل‌ها: file_name را ترجیح می‌دهد
-    """
-    node = full_db.get(node_id, {})
-    contents = node.get("contents", [])
-
-    if not isinstance(content_index, int) or not (0 <= content_index < len(contents)):
-        return "فایل بدون نام"
-
-    item = contents[content_index]
-    item_type = item.get("type")
-
-    # فقط برای متن: بخشی از متن را به عنوان عنوان نمایش بده
-    if item_type == "text":
-        raw_text = item.get("text", "") or ""
-        # حذف تگ‌های HTML احتمالی درون متن
-        raw_text = strip_html_tags(raw_text)
-        clean_text = " ".join(raw_text.split())  # حذف \n و فاصله‌های اضافه
-
-        if not clean_text:
-            return "محتوای متنی"
-
-        limit = 70
-        if len(clean_text) > limit:
-            return clean_text[:limit].rstrip() + "..."
-        return clean_text
-
-    # برای بقیه فایل‌ها: اسم فایل را از دیتابیس بگیر
-    title = (
-        item.get("file_name")
-        or item.get("title")
-        or item.get("caption")
-        or "فایل بدون نام"
-    )
-
-    # پاکسازی تگ‌های HTML از عنوان فایل/کپشن
-    title = strip_html_tags(str(title))
-    title = " ".join(title.split())
-
-    if len(title) > 70:
-        title = title[:70].rstrip() + "..."
-
-    return title
-
-
-
-def render_search_result(item, full_db, bot_username):
-    """
-    هر نتیجه جستجو را به HTML قابل نمایش در تلگرام تبدیل می‌کند.
-    """
-    node_id = item["node_id"]
-    path_html = get_node_path_html(full_db, node_id, bot_username)
-    score = int(item.get("score", 0))
-
-    if item.get("result_type") == "content":
-        content_index = item.get("content_index")
-        file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-
-        raw_title = get_search_result_title(full_db, node_id, content_index)
-        safe_title = html.escape(raw_title)
-
-        return (
-            f"📄 {path_html} / <a href='{file_link}'>{safe_title}</a>\n"
-            f"درصد تطابق: {score}٪\n\n"
-        )
-
-    return (
-        f"📂 {path_html}\n"
-        f"درصد تطابق: {score}٪\n\n"
-    )
-
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
 
@@ -2895,15 +2811,37 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     # ۵ نتیجه اول
     top_results = results[:5]
     for item in top_results:
-        msg += render_search_result(item, full_db, bot_username)
+        node_id = item["node_id"]
+        path_html = get_node_path_html(full_db, node_id, bot_username)
 
-    # ۱۰ نتیجه بعدی
+        if item.get("result_type") == "content":
+            file_title = html.escape(item.get("title", "فایل بدون نام"))
+            content_index = item.get("content_index")
+            file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
+            msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
+        else:
+            msg += f"📂 {path_html}\n"
+
+        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+
+    # ۱۰ نتیجه بعدی (رتبه‌های ۶ تا ۱۵) در قالب بلاک‌کوت جمع‌شونده (expandable)
     extra_results = results[5:15]
     if extra_results:
         msg += "📋 <b>نتایج بیشتر:</b>\n"
         msg += "<blockquote expandable>\n"
         for item in extra_results:
-            msg += render_search_result(item, full_db, bot_username)
+            node_id = item["node_id"]
+            path_html = get_node_path_html(full_db, node_id, bot_username)
+
+            if item.get("result_type") == "content":
+                file_title = html.escape(item.get("title", "فایل بدون نام"))
+                content_index = item.get("content_index")
+                file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
+                msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
+            else:
+                msg += f"📂 {path_html}\n"
+
+            msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
         msg += "</blockquote>\n"
 
     msg += (
@@ -2920,7 +2858,6 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     return CHOOSING
-
 
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
