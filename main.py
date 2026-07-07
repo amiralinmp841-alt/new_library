@@ -2749,12 +2749,13 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
-    # ثبت اولیه کاربر در صورت عدم وجود
+    # اگر کاربر در userdata نبود، ثبت اولیه شود
     if user_id not in users:
         track_user_activity(update, count_message=False)
         userdata = load_userdata()
         users = userdata.setdefault("users", {})
 
+    # دیفالت = root
     search_mode = users.get(user_id, {}).get("search_mode", "root")
 
     # تعیین محدوده جستجو
@@ -2767,8 +2768,10 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         mode_title = "General Search"
         mode_desc = "جستجو در کل کتابخانه انجام شد."
 
-    # فراخوانی تابع سرچ هوشمند جدید با آرگومان روتِ مشخص
-    results = smart_search(full_db, text, root_node_id=search_root, limit=5, min_score=45)
+    subtree_db = get_subtree_db(full_db, search_root)
+
+    # جستجو
+    results = smart_search(subtree_db, text, limit=5, min_score=45)
 
     help_text = (
         "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
@@ -2804,27 +2807,15 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     for item in results:
-        score = int(item["score"])
-        path_text = item["path"]
-        title_escaped = html.escape(item["title"])
+        node_id = item["node_id"]
 
-        if item["type"] == "node":
-            # پوشه ها
-            node_id = item["node_id"]
-            link = f"https://t.me/{bot_username}?start={node_id}"
-            msg += f"📂 <b><a href='{link}'>{title_escaped}</a></b>\n"
-        else:
-            # فایل‌ها (با ساختار دیپ‌لینک فایل تفکیک‌شده)
-            node_id = item["node_id"]
-            idx = item["content_index"]
-            link = f"https://t.me/{bot_username}?start=file_{node_id}_{idx}"
-            msg += f"📄 <b><a href='{link}'>{title_escaped}</a></b> (فایل)\n"
+        path_html = get_node_path_html(full_db, node_id, bot_username)
 
-        msg += f"📍 مسیر: <code>{path_text}</code>\n"
-        msg += f"🎯 درصد تطابق: {score}٪\n\n"
+        msg += f"📂 {path_html}\n"
+        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
     msg += (
-        "🪄 روی نام پوشه یا فایل کلیک کنید تا مستقیماً به آن هدایت شوید.\n\n"
+        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n\n"
         f"{help_text}"
     )
 
@@ -2873,7 +2864,7 @@ async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if current_node == "root":
             await update.message.reply_text(
                 "📂 حالت جستجو روی <b>Current Folder Search</b> قرار گرفت.\n"
-                "📂 اکنون در صفحه اصلی هستید؛ بنابراین جستجو عملا روی تمام محتوای کتابخانه انجام می‌شود.",
+                "الان شما در روت هستید، پس عملاً جستجو روی کل ساختار روت انجام می‌شود.",
                 parse_mode="HTML"
             )
         else:
@@ -6226,6 +6217,6 @@ async def main():
 
     # برنامه همیشه اجرا باقی بماند
     await asyncio.Event().wait()
-    
+
 if __name__=="__main__":
     asyncio.run(main())
