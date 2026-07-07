@@ -2770,7 +2770,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     subtree_db = get_subtree_db(full_db, search_root)
 
-    # جستجو
+    # جستجو: مجموعا 15 نتیجه
     results = smart_search(subtree_db, text, limit=15, min_score=45)
 
     help_block = (
@@ -2817,24 +2817,26 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # 5 نتیجه اول
     first_results = results[:5]
-    more_results = results[5:]
+    # 10 نتیجه بعدی
+    more_results = results[5:15]
 
+    first_block = "<blockquote expandable>\n📋 نتایج اولیه:\n\n"
     for item in first_results:
         node_id = item["node_id"]
         path_html = get_node_path_html(full_db, node_id, bot_username)
-        msg += f"📂 {path_html}\n"
-        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+        first_block += f"📂 {path_html}\n"
+        first_block += f"درصد تطابق: {int(item['score'])}٪\n\n"
+    first_block += "</blockquote>"
 
-    # نتایج بیشتر
+    msg += first_block + "\n\n"
+
     if more_results:
         more_block = "<blockquote expandable>\n📋 نتایج بیشتر:\n\n"
-
         for item in more_results:
             node_id = item["node_id"]
             path_html = get_node_path_html(full_db, node_id, bot_username)
             more_block += f"📂 {path_html}\n"
             more_block += f"درصد تطابق: {int(item['score'])}٪\n\n"
-
         more_block += "</blockquote>"
         msg += more_block + "\n\n"
 
