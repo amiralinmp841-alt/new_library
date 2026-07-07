@@ -2548,15 +2548,33 @@ async def handle_reply_change(update: Update, context: ContextTypes.DEFAULT_TYPE
 def get_subtree_db(db, root_node_id):
     subtree = {}
 
+    def build_search_context(node_id):
+        parts = []
+        current = node_id
+
+        while current and current in db:
+            if current != "root":
+                parts.append(db[current].get("name", ""))
+            current = db[current].get("parent")
+
+        parts.reverse()
+        return " ".join(parts)
+
     def add_node_recursive(node_id):
         if node_id not in db:
             return
 
         node = copy.deepcopy(db[node_id])
+
+        search_context = build_search_context(node_id)
+
+        # متن جستجو را مستقیماً داخل name قرار می‌دهیم
+        node["name"] = search_context
+
         subtree[node_id] = node
 
-        for child_id in db[node_id].get("children", []):
-            add_node_recursive(child_id)
+        for child in db[node_id].get("children", []):
+            add_node_recursive(child)
 
     add_node_recursive(root_node_id)
     return subtree
@@ -5317,112 +5335,84 @@ async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def extract_message_content(msg):
     raw_text = msg.text
-    raw_caption = msg.caption or ""
+    raw_caption = msg.caption
 
     msg_entities = [e.to_dict() for e in msg.entities] if msg.entities else None
     msg_caption_entities = [e.to_dict() for e in msg.caption_entities] if msg.caption_entities else None
     media_group_id = msg.media_group_id
 
     if msg.photo:
-        ph = msg.photo[-1]
         return {
             "type": "photo",
-            "file_id": ph.file_id,
-            "file_unique_id": getattr(ph, "file_unique_id", None),
+            "file_id": msg.photo[-1].file_id,
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.video:
-        v = msg.video
         return {
             "type": "video",
-            "file_id": v.file_id,
-            "file_unique_id": getattr(v, "file_unique_id", None),
-            "file_name": getattr(v, "file_name", None),   # ممکنه None باشه
-            "mime_type": getattr(v, "mime_type", None),
+            "file_id": msg.video.file_id,
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.document:
-        d = msg.document
         return {
             "type": "document",
-            "file_id": d.file_id,
-            "file_unique_id": getattr(d, "file_unique_id", None),
-            "file_name": getattr(d, "file_name", None),   # مهم‌ترین برای سرچ
-            "mime_type": getattr(d, "mime_type", None),
+            "file_id": msg.document.file_id,
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.audio:
-        a = msg.audio
         return {
             "type": "audio",
-            "file_id": a.file_id,
-            "file_unique_id": getattr(a, "file_unique_id", None),
-            "file_name": getattr(a, "file_name", None),
-            "mime_type": getattr(a, "mime_type", None),
-            "title": getattr(a, "title", None),
-            "performer": getattr(a, "performer", None),
+            "file_id": msg.audio.file_id,
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.voice:
-        vc = msg.voice
         return {
             "type": "voice",
-            "file_id": vc.file_id,
-            "file_unique_id": getattr(vc, "file_unique_id", None),
-            "mime_type": getattr(vc, "mime_type", None),
+            "file_id": msg.voice.file_id,
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.animation:
-        an = msg.animation
         return {
             "type": "animation",
-            "file_id": an.file_id,
-            "file_unique_id": getattr(an, "file_unique_id", None),
-            "file_name": getattr(an, "file_name", None),
-            "mime_type": getattr(an, "mime_type", None),
+            "file_id": msg.animation.file_id,
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.video_note:
-        vn = msg.video_note
         return {
             "type": "video_note",
-            "file_id": vn.file_id,
-            "file_unique_id": getattr(vn, "file_unique_id", None),
+            "file_id": msg.video_note.file_id,
             "media_group_id": media_group_id,
         }
 
     if msg.sticker:
-        st = msg.sticker
         return {
             "type": "sticker",
-            "file_id": st.file_id,
-            "file_unique_id": getattr(st, "file_unique_id", None),
-            "emoji": getattr(st, "emoji", None),
+            "file_id": msg.sticker.file_id,
             "media_group_id": media_group_id,
         }
 
     if msg.text and not msg.text.startswith('/'):
         return {
             "type": "text",
-            "text": raw_text or "",
+            "text": raw_text,
             "entities": msg_entities,
         }
 
