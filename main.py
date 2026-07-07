@@ -6216,7 +6216,7 @@ async def webhook_handler(request):
 async def main():
     tg_app = build_application()
     await tg_app.initialize()
-    await tg_app.start()
+    #await tg_app.start()
     await tg_app.bot.set_webhook(
         f"{WEBHOOK_URL}/{TOKEN}",
         allowed_updates=[
