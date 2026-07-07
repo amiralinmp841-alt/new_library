@@ -1,43 +1,86 @@
 from rapidfuzz import fuzz
 import re
 
-# --- دیکشنری مترادفات پزشکی ---
+# --- دیکشنری مترادفات تخصصی پزشکی ---
 MEDICAL_SYNONYMS = {
     "اناتومی": ["علوم تشریح", "تشریح", "anatomy"],
     "علوم تشریح": ["اناتومی", "تشریح", "anatomy"],
-    "هیستولوژی": ["بافت شناسی", "histology"],
-    "بافت شناسی": ["هیستولوژی", "histology"],
+    "تشریح": ["اناتومی", "علوم تشریح", "anatomy"],
+    "هیستولوژی": ["بافت شناسی", "بافت", "histology"],
+    "بافت شناسی": ["هیستولوژی", "بافت", "histology"],
     "پاتولوژی": ["اسیب شناسی", "آسیب شناسی", "pathology"],
+    "اسیب شناسی": ["پاتولوژی", "آسیب شناسی", "pathology"],
+    "آسیب شناسی": ["پاتولوژی", "اسیب شناسی", "pathology"],
     "فیزیولوژی": ["physiology"],
     "بیوشیمی": ["biochemistry"],
     "فارماکولوژی": ["داروشناسی", "pharmacology"],
+    "داروشناسی": ["فارماکولوژی", "pharmacology"],
+    "نورولوژی": ["مغز و اعصاب", "neurology"],
+    "مغز و اعصاب": ["نورولوژی", "neurology"],
+    "کاردیولوژی": ["قلب و عروق", "قلب", "cardiology"],
 }
 
 def normalize_text(text: str) -> str:
-    if not text: return ""
+    if not text:
+        return ""
+
     text = str(text).lower()
-    replacements = {"ي": "ی", "ك": "ک", "ۀ": "ه", "ة": "ه", "آ": "ا", "أ": "ا", "\u200c": " ", "_": " ", "-": " "}
+
+    # یکسان‌سازی کاراکترهای عربی و فارسی و نیم‌فاصله‌ها
+    replacements = {
+        "ي": "ی",
+        "ك": "ک",
+        "ۀ": "ه",
+        "ة": "ه",
+        "ؤ": "و",
+        "إ": "ا",
+        "أ": "ا",
+        "آ": "ا",
+        "\u200c": " ",
+        "_": " ",
+        "-": " ",
+    }
+
     for old, new in replacements.items():
         text = text.replace(old, new)
-    # حذف پسوند فایل‌ها برای جلوگیری از تطابق اشتباه
-    text = re.sub(r"\.(pdf|mp4|mp3|jpg|jpeg|zip|docx|pptx)\b", " ", text)
+
+    # حذف پسوندهای متداول فایل جهت جلوگیری از تداخل در جستجو
+    text = re.sub(r"\.(pdf|mp4|mp3|zip|rar|docx|pptx|png|jpg|jpeg)\b", " ", text)
+
+    # حذف علائم اضافی به جز حروف و اعداد فارسی و انگلیسی
     text = re.sub(r"[^\w\sآ-ی]", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+
+    # حذف فاصله‌های اضافه
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
 
 def expand_query(query: str) -> str:
-    """اضافه کردن هم‌معنی‌ها به کوئری کاربر"""
-    tokens = normalize_text(query).split()
-    expanded = list(tokens)
-    for t in tokens:
-        for key, syns in MEDICAL_SYNONYMS.items():
-            if t == key or t in syns:
-                expanded.extend([normalize_text(key)] + [normalize_text(s) for s in syns])
-    return " ".join(list(dict.fromkeys(expanded)))
+    """
+    بسط دادن کوئری کاربر با استفاده از دیکشنری هم‌معنی‌ها
+    """
+    normalized_q = normalize_text(query)
+    tokens = normalized_q.split()
+    expanded_tokens = list(tokens)
+
+    for token in tokens:
+        for key, synonyms in MEDICAL_SYNONYMS.items():
+            norm_key = normalize_text(key)
+            norm_syns = [normalize_text(s) for s in synonyms]
+            
+            if token == norm_key or token in norm_syns:
+                expanded_tokens.append(norm_key)
+                expanded_tokens.extend(norm_syns)
+
+    # حذف توکن‌های تکراری و حفظ ترتیب
+    return " ".join(list(dict.fromkeys(expanded_tokens)))
 
 def build_search_documents(db, root_node_id="root"):
-    """تبدیل دیتابیس به لیست تخت از پوشه‌ها و فایل‌ها"""
+    """
+    تبدیل دیتابیس درختی به یک لیست تخت از اسناد قابل جستجو (پوشه‌ها و فایل‌ها).
+    """
     documents = []
-    
+
     def get_path_parts(node_id):
         parts = []
         curr = node_id
@@ -48,36 +91,42 @@ def build_search_documents(db, root_node_id="root"):
 
     def walk(node_id):
         node = db.get(node_id)
-        if not node: return
-        
+        if not node:
+            return
+
         path_parts = get_path_parts(node_id)
         node_name = node.get("name", "")
         path_str = " ⬅️ ".join(path_parts)
 
-        # ۱. اضافه کردن خود پوشه به عنوان یک نتیجه
+        # ۱. افزودن خود پوشه به عنوان یک هدف جستجوی مستقل
         if node_id != "root":
             documents.append({
                 "type": "node",
-                "id": node_id,
+                "node_id": node_id,
                 "title": node_name,
                 "path": path_str,
                 "search_text": normalize_text(f"{node_name} {' '.join(path_parts)}")
             })
 
-        # ۲. اضافه کردن تک‌تک محتویات (فایل‌ها) به عنوان نتایج مستقل
+        # ۲. افزودن تک‌تک فایل‌ها/محتویات داخل پوشه به عنوان هدف مستقل
         for idx, item in enumerate(node.get("contents", [])):
-            # استخراج بهترین نام برای فایل (نام فایل یا کپشن)
-            f_name = item.get("file_name") or item.get("caption") or item.get("text") or "فایل بدون نام"
-            # تمیز کردن برای نمایش (فقط خط اول یا ۶۰ کاراکتر اول)
-            display_title = str(f_name).split('\n')[0][:60]
+            # استخراج نام برای فایل (اولویت با نام واقعی فایل، سپس کپشن، سپس متن)
+            file_name = item.get("file_name") or item.get("caption") or item.get("text") or "فایل بدون نام"
+            
+            # تمیزکاری نام برای نمایش در نتایج (خط اول تا حداکثر ۶۰ کاراکتر)
+            display_title = str(file_name).split('\n')[0][:60].strip()
+            
+            # تجمیع متن سرچ فایل: اسم فایل + کپشن + نام پوشه والد + کل مسیر پوشه
+            caption_text = item.get("caption") or ""
+            search_text_raw = f"{file_name} {caption_text} {node_name} {' '.join(path_parts)}"
             
             documents.append({
                 "type": "content",
-                "id": node_id, # آیدی پوشه والد برای دیپ‌لینک
+                "node_id": node_id,
                 "content_index": idx,
                 "title": display_title,
                 "path": path_str,
-                "search_text": normalize_text(f"{f_name} {item.get('caption', '')} {node_name} {' '.join(path_parts)}")
+                "search_text": normalize_text(search_text_raw)
             })
 
         for child_id in node.get("children", []):
@@ -86,25 +135,38 @@ def build_search_documents(db, root_node_id="root"):
     walk(root_node_id)
     return documents
 
-def smart_search(db, query, root_node_id="root", limit=6, min_score=40):
+def smart_search(db, query, root_node_id="root", limit=5, min_score=45):
     query_norm = normalize_text(query)
-    if not query_norm: return []
+    if not query_norm:
+        return []
+
+    # بسط دادن عبارات جستجو با دیکشنری مترادف‌ها
+    query_expanded = expand_query(query)
     
-    expanded_q = expand_query(query)
-    docs = build_search_documents(db, root_node_id)
+    # ساخت لیست تخت اسناد
+    documents = build_search_documents(db, root_node_id)
     results = []
 
-    for doc in docs:
-        # جلوگیری از ۱۰۰٪ کاذب: اگر کلمه خیلی کوتاه است، سخت‌گیرانه‌تر عمل کن
+    for doc in documents:
+        text = doc["search_text"]
+
+        # اگر کوئری کاربر خیلی کوتاه باشد (کمتر از ۴ کاراکتر) برای جلوگیری از تطابق‌های کاذب
+        # از الگوریتم سخت‌گیرانه‌تر استفاده می‌کنیم.
         if len(query_norm) < 4:
-            score = fuzz.token_set_ratio(expanded_q, doc["search_text"])
+            score = fuzz.token_set_ratio(query_expanded, text)
         else:
-            score = max(fuzz.token_set_ratio(expanded_q, doc["search_text"]), 
-                        fuzz.partial_ratio(expanded_q, doc["search_text"]) * 0.9) # کاهش وزن تطابق جزئی
+            # ترکیب روش‌ها با ضریب تعدیل جزیی (کاهش وزن جزئی partial_ratio به میزان ۹۰٪ برای کاهش نتایج کاذب)
+            score_set = fuzz.token_set_ratio(query_expanded, text)
+            score_partial = fuzz.partial_ratio(query_expanded, text) * 0.9
+            score_w = fuzz.WRatio(query_expanded, text)
+            score = max(score_set, score_partial, score_w)
 
         if score >= min_score:
-            doc["score"] = score
-            results.append(doc)
+            doc_copy = doc.copy()
+            doc_copy["score"] = score
+            results.append(doc_copy)
 
+    # مرتب‌سازی بر اساس بیشترین امتیاز
     results.sort(key=lambda x: x["score"], reverse=True)
+
     return results[:limit]
