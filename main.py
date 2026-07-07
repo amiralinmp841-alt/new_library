@@ -39,7 +39,7 @@ from telegram.ext import (
     ApplicationHandlerStop,
     MessageReactionHandler
 )
-
+import re
 import copy
 from flask import Flask
 import threading
