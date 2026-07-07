@@ -2851,7 +2851,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         "</blockquote>"
     )
 
-    if not res:
+    if not results:
         if search_mode == "current_node":
             not_found_text = (
                 "🔍 نتیجه‌ای در <b>Current Folde Search</b> یافت نشد.\n\n"
