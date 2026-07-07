@@ -37,7 +37,8 @@ from telegram.ext import (
     filters,
     ConversationHandler,
     ApplicationHandlerStop,
-    MessageReactionHandler
+    MessageReactionHandler,
+    Application
 )
 
 import time
