@@ -2749,13 +2749,12 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
-    # اگر کاربر در userdata نبود، ثبت اولیه شود
+    # ثبت اولیه کاربر در صورت عدم وجود
     if user_id not in users:
         track_user_activity(update, count_message=False)
         userdata = load_userdata()
         users = userdata.setdefault("users", {})
 
-    # دیفالت = root
     search_mode = users.get(user_id, {}).get("search_mode", "root")
 
     # تعیین محدوده جستجو
@@ -2768,16 +2767,12 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         mode_title = "General Search"
         mode_desc = "جستجو در کل کتابخانه انجام شد."
 
-    subtree_db = get_subtree_db(full_db, search_root)
-
-    # دریافت تا ۱۵ نتیجه (فقط پوشه‌ها)
-    results = smart_search(subtree_db, text, limit=15, min_score=45)
+    # فراخوانی تابع سرچ هوشمند جدید با آرگومان روتِ مشخص
+    results = smart_search(full_db, text, root_node_id=search_root, limit=5, min_score=45)
 
     help_text = (
-        "<blockquote>"
         "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
         "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
-        "</blockquote>"
     )
 
     if not results:
@@ -2805,33 +2800,31 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = (
         f"🔎 <b>{mode_title}</b>\n"
         f"{mode_desc}\n\n"
-        f"🔍 پوشه‌های یافت شده با بیشترین تطابق:\n\n"
+        f"🔍 نتایج یافت شده:\n\n"
     )
 
-    # ۵ نتیجه اول
-    top_results = results[:5]
-    for item in top_results:
-        node_id = item["node_id"]
-        path_html = get_node_path_html(full_db, node_id, bot_username)
-        msg += f"📂 {path_html}\n"
-        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+    for item in results:
+        score = int(item["score"])
+        path_text = item["path"]
+        title_escaped = html.escape(item["title"])
 
-    # ۱۰ نتیجه بعدی (رتبه‌های ۶ تا ۱۵) در قالب بلاک‌کوت جمع‌شونده (expandable)
-    extra_results = results[5:15]
-    if extra_results:
-        msg += "📋 <b>نتایج بیشتر:</b>\n"
-        msg += "<blockquote expandable>\n"
-        for item in extra_results:
+        if item["type"] == "node":
+            # پوشه ها
             node_id = item["node_id"]
-            path_html = get_node_path_html(full_db, node_id, bot_username)
-            msg += f"📂 {path_html}\n"
-            msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
-        msg += "</blockquote>\n"
+            link = f"https://t.me/{bot_username}?start={node_id}"
+            msg += f"📂 <b><a href='{link}'>{title_escaped}</a></b>\n"
+        else:
+            # فایل‌ها (با ساختار دیپ‌لینک فایل تفکیک‌شده)
+            node_id = item["node_id"]
+            idx = item["content_index"]
+            link = f"https://t.me/{bot_username}?start=file_{node_id}_{idx}"
+            msg += f"📄 <b><a href='{link}'>{title_escaped}</a></b> (فایل)\n"
+
+        msg += f"📍 مسیر: <code>{path_text}</code>\n"
+        msg += f"🎯 درصد تطابق: {score}٪\n\n"
 
     msg += (
-        "<blockquote>"
-        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید."
-        "</blockquote>\n\n"
+        "🪄 روی نام پوشه یا فایل کلیک کنید تا مستقیماً به آن هدایت شوید.\n\n"
         f"{help_text}"
     )
 
@@ -2842,7 +2835,6 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     return CHOOSING
-
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
