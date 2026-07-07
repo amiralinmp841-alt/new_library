@@ -2736,7 +2736,15 @@ def get_subtree_db(db, root_node_id):
     add_node_recursive(root_node_id)
     return subtree
 
-import html
+
+def strip_html_tags(text):
+    """
+    حذف تمامی تگ‌های HTML مانند <b>, <i>, <u>, <a> و غیره برای جلوگیری از تداخل ساختاری
+    """
+    if not text:
+        return ""
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', text)
 
 def get_search_result_title(full_db, node_id, content_index):
     """
@@ -2756,6 +2764,8 @@ def get_search_result_title(full_db, node_id, content_index):
     # فقط برای متن: بخشی از متن را به عنوان عنوان نمایش بده
     if item_type == "text":
         raw_text = item.get("text", "") or ""
+        # حذف تگ‌های HTML احتمالی درون متن
+        raw_text = strip_html_tags(raw_text)
         clean_text = " ".join(raw_text.split())  # حذف \n و فاصله‌های اضافه
 
         if not clean_text:
@@ -2774,12 +2784,15 @@ def get_search_result_title(full_db, node_id, content_index):
         or "فایل بدون نام"
     )
 
-    title = " ".join(str(title).split())
+    # پاکسازی تگ‌های HTML از عنوان فایل/کپشن
+    title = strip_html_tags(str(title))
+    title = " ".join(title.split())
 
     if len(title) > 70:
         title = title[:70].rstrip() + "..."
 
     return title
+
 
 
 def render_search_result(item, full_db, bot_username):
