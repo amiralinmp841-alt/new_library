@@ -631,6 +631,65 @@ def set_pending_caption(context, caption):
 def pop_pending_caption(context):
     return context.user_data.pop("pending_caption", None)
 
+#============ تعیین استایل پوشه ها ==============#
+
+#------ تغییر تعداد هر دکمه در یک ردیف ----------
+async def set_row_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    userdata = load_userdata()
+    is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
+
+    if not is_admin:
+        return
+
+    command = update.message.text.lower() # مثلا "/3"
+    
+    # استخراج عدد از دستور
+    try:
+        count = int(command.replace("/", ""))
+        if not (1 <= count <= 6): # محدودیت منطقی بین 1 تا 6
+            raise ValueError
+    except:
+        await update.message.reply_text("❌ لطفاً عدد بین ۱ تا ۶ وارد کنید. مثال: /3")
+        return
+
+    current_node_id = context.user_data.get("current_node", "root")
+    db = load_db()
+
+    if current_node_id not in db:
+        await update.message.reply_text("❌ پوشه فعلی در دیتابیس پیدا نشد.")
+        return
+
+    push_admin_history(context, db)
+    
+    old_count = db[current_node_id].get("row_count", 2)
+    db[current_node_id]["row_count"] = count
+    
+    bot_username = context.bot.username
+    node_name = db[current_node_id]["name"]
+    node_link = get_link(current_node_id, node_name, bot_username)
+    
+    desc = (
+        f"🔢 تعداد ستون‌های پوشه {node_link} "
+        f"از «{old_count}» به «{count}» تغییر کرد."
+    )
+    
+    log_caption = format_admin_log(update.effective_user, desc)
+    backup_caption = format_backup_caption(update.effective_user, "تغییر تعداد ستون دکمه‌ها")
+    
+    set_pending_caption(context, log_caption)
+    set_pending_backup_caption(context, backup_caption)
+    
+    save_db(db, context=context)
+
+    await update.message.reply_text(
+        f"✅ تعداد ستون‌ها برای این پوشه به {count} تغییر یافت.",
+        reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
+    )
+
+    return CHOOSING
+
+
 #------ دکمه های رنگی ----------
 async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -720,7 +779,7 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return CHOOSING
 
-# ========= reactions ===============
+# ========= reactions =====================
 
 
 # ========= favorite folder ===============
@@ -897,7 +956,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_emojis = [r.emoji for r in reaction.new_reaction]
     old_emojis = [r.emoji for r in reaction.old_reaction]
 
-    HEARTS = {"❤", "❤️"}
+    HEARTS = {"❤", "❤️", "❤️‍🔥"}
     DISLIKES = {"👎", "🖕", "💩"}
 
     added_heart = any(e in HEARTS for e in new_emojis) and not any(e in HEARTS for e in old_emojis)
@@ -1059,6 +1118,9 @@ def get_keyboard(node_id, is_admin, user_id=None):
     if not node:
         return ReplyKeyboardMarkup([["/start"]], resize_keyboard=True)
 
+    # 💡 خواندن تعداد ستون (پیش‌فرض ۲)
+    max_cols = node.get("row_count", 2) 
+
     keyboard = []
 
     # --- دکمه‌های فرزند (همان کدی که داشتی) ---
@@ -1078,7 +1140,7 @@ def get_keyboard(node_id, is_admin, user_id=None):
                 button = KeyboardButton(text=child_node["name"])
             row.append(button)
             
-            if len(row) == 2:
+            if len(row) == max_cols:
                 keyboard.append(row)
                 row = []
     if row:
@@ -1941,13 +2003,14 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # ۱) تابع کمکی اصلاح شده برای تولید ساختار لاگ ادمین
 # ==========================================
 
-# تابع کمکی استخراج جزئیات دقیق فایل‌ها و متون برای بخش لاگ
+# ======= تابع کمکی استخراج جزئیات دقیق فایل‌ها و متون برای بخش لاگ ==== برای حذف و اضافه فایل ها ============#
 def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     msg_type = item.get("type", "text")
     if msg_type == "text":
         text_content = item.get("text", "")
         text_escaped = escape(text_content)
-        preview = text_escaped[:200] + "..." if len(text_escaped) > 200 else text_escaped
+        #preview = text_escaped[:200] + "..." if len(text_escaped) > 200 else text_escaped
+        preview = text_escaped[:4096] + "..." if len(text_escaped) > 4096 else text_escaped
         return f"📝 <b>پیام متنی {index}:</b>\n<blockquote expandable>{preview}</blockquote>"
     
     file_id = item.get("file_id", "")
@@ -1960,6 +2023,7 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
         f"🔑 شناسه فایل:\n<code>{file_id}</code>\n"
         f"✍️ کپشن: <blockquote expandable>{caption_escaped}</blockquote>"
     )
+# ================= فرمت کپشن برای فایل بکاپ ===================
 
 def format_admin_log(admin_user, description):
     admin_link = get_admin_link(admin_user)
@@ -1995,6 +2059,8 @@ def split_html_message_by_lines(text: str, max_len: int = 3000) -> list:
     if current_chunk:
         chunks.append("\n".join(current_chunk))
     return chunks
+
+# ================= هدر لاگ تغییرات ادمین===================
 
 def format_backup_caption(admin_user, action_type):
     admin_link = get_admin_link(admin_user)
@@ -5753,6 +5819,12 @@ def build_application():
     application.add_handler(CommandHandler("clear", clear_favorites_cmd), group=0)
     application.add_handler(CommandHandler("on_off_favorite", on_off_favorite))
     application.add_handler(CommandHandler("on_off_search", toggle_smart_search), group=0)
+    application.add_handler(CommandHandler("1", set_row_count), group=0)
+    application.add_handler(CommandHandler("2", set_row_count), group=0)
+    application.add_handler(CommandHandler("3", set_row_count), group=0)
+    application.add_handler(CommandHandler("4", set_row_count), group=0)
+    application.add_handler(CommandHandler("5", set_row_count), group=0)
+    application.add_handler(CommandHandler("6", set_row_count), group=0)
     
     application.add_handler(
         MessageReactionHandler(handle_reaction, message_reaction_types=MessageReactionHandler.MESSAGE_REACTION), 
