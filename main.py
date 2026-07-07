@@ -2749,98 +2749,102 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
-    # اگر کاربر در userdata نبود، ثبت اولیه شود
     if user_id not in users:
         track_user_activity(update, count_message=False)
         userdata = load_userdata()
         users = userdata.setdefault("users", {})
 
-    # دیفالت = root
     search_mode = users.get(user_id, {}).get("search_mode", "root")
 
-    # تعیین محدوده جستجو
     if search_mode == "current_node":
         search_root = current_node
         mode_title = "Current Folder Search"
-        mode_desc = "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شد."
+        mode_desc = "جستجو فقط در <b>پوشه فعلی و زیرشاخه‌های آن</b> انجام شد."
     else:
         search_root = "root"
         mode_title = "General Search"
-        mode_desc = "جستجو در کل کتابخانه انجام شد."
+        mode_desc = "جستجو در <b>کل کتابخانه</b> انجام شد."
 
     subtree_db = get_subtree_db(full_db, search_root)
 
-    # جستجو: مجموعا 15 نتیجه
-    results = smart_search(subtree_db, text, limit=15, min_score=45)
-
-    help_block = (
-        "<blockquote>"
-        "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
-        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
-        "</blockquote>"
+    results = smart_search(
+        subtree_db,
+        text,
+        limit=15,
+        min_score=45
     )
 
-    path_hint_block = (
-        "<blockquote>"
-        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید."
-        "</blockquote>"
+    help_block = (
+        "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
+        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
     )
 
     if not results:
-        if search_mode == "current_node":
-            not_found_text = (
-                "🔍 نتیجه‌ای در <b>Current Folder Search</b> یافت نشد.\n\n"
-                "⚠️ توجه!\n"
-                "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شده است.\n"
-                "اگر می‌خواهید در کل کتابخانه جستجو شود، /search_mode را بزنید."
-            )
-        else:
-            not_found_text = (
-                "🔍 نتیجه‌ای در <b>General Search</b> یافت نشد.\n\n"
-                "جستجو در کل کتابخانه انجام شد اما نتیجه‌ای پیدا نشد."
-            )
-
         await update.message.reply_text(
-            f"{not_found_text}\n\n{help_block}",
-            parse_mode="HTML",
-            disable_web_page_preview=True
+            f"🔍 نتیجه‌ای یافت نشد.\n\n"
+            f"{mode_desc}\n\n"
+            f"💡 {help_block}",
+            parse_mode="HTML"
         )
         return CHOOSING
+
 
     bot_username = context.bot.username
 
     msg = (
         f"🔎 <b>{mode_title}</b>\n"
         f"{mode_desc}\n\n"
-        f"🔍 نتایج یافت شده:\n\n"
+        "🔍 <b>نتایج یافت شده:</b>\n\n"
     )
 
-    # 5 نتیجه اول
-    first_results = results[:5]
-    # 10 نتیجه بعدی
-    more_results = results[5:15]
 
-    first_block = "<blockquote expandable>\n📋 نتایج اولیه:\n\n"
-    for item in first_results:
+    # پنج نتیجه اول
+    for item in results[:5]:
         node_id = item["node_id"]
-        path_html = get_node_path_html(full_db, node_id, bot_username)
-        first_block += f"📂 {path_html}\n"
-        first_block += f"درصد تطابق: {int(item['score'])}٪\n\n"
-    first_block += "</blockquote>"
 
-    msg += first_block + "\n\n"
+        path_html = get_node_path_html(
+            full_db,
+            node_id,
+            bot_username
+        )
 
-    if more_results:
-        more_block = "<blockquote expandable>\n📋 نتایج بیشتر:\n\n"
-        for item in more_results:
+        msg += (
+            f"📂 {path_html}\n"
+            f"درصد تطابق: {int(item['score'])}٪\n\n"
+        )
+
+
+    # نتایج بیشتر
+    if len(results) > 5:
+
+        msg += (
+            "<blockquote expandable>"
+            "📋 <b>نتایج بیشتر:</b>\n\n"
+        )
+
+        for item in results[5:15]:
             node_id = item["node_id"]
-            path_html = get_node_path_html(full_db, node_id, bot_username)
-            more_block += f"📂 {path_html}\n"
-            more_block += f"درصد تطابق: {int(item['score'])}٪\n\n"
-        more_block += "</blockquote>"
-        msg += more_block + "\n\n"
 
-    msg += path_hint_block + "\n\n" + help_block
+            path_html = get_node_path_html(
+                full_db,
+                node_id,
+                bot_username
+            )
+
+            msg += (
+                f"📂 {path_html}\n"
+                f"درصد تطابق: {int(item['score'])}٪\n\n"
+            )
+
+        msg += "</blockquote>\n\n"
+
+
+    msg += (
+        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید "
+        "تا مستقیم به همان پوشه بروید.\n\n"
+        f"{help_block}"
+    )
+
 
     await update.message.reply_text(
         msg,
@@ -2849,7 +2853,6 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     return CHOOSING
-
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
