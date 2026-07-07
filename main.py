@@ -2723,13 +2723,12 @@ def get_subtree_db(db, root_node_id):
             return
 
         node = copy.deepcopy(db[node_id])
-
         search_context = build_search_context(node_id)
-
-        # متن جستجو را مستقیماً داخل name قرار می‌دهیم
         node["name"] = search_context
 
-        subtree[node_id] = node
+        # ✅ اگر نود فعلی همان ریشه جستجو باشد و ریشه اصلی (root) نباشد، خود نود را در دیتابیس جستجو قرار نده.
+        if node_id != root_node_id or root_node_id == "root":
+            subtree[node_id] = node
 
         for child in db[node_id].get("children", []):
             add_node_recursive(child)
@@ -2828,11 +2827,6 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     return CHOOSING
 
-def get_search_root_by_mode(context, search_mode: str) -> str:
-    if search_mode == "current_node":
-        return context.user_data.get("current_node", "root")
-    return "root"
-
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user:
@@ -2842,47 +2836,45 @@ async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE)
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
-    # اطمینان از ثبت کاربر در سیستم
+    # اگر کاربر هنوز در userdata نبود، اول ثبتش کن
     if user_id not in users:
         track_user_activity(update, count_message=False)
         userdata = load_userdata()
         users = userdata.setdefault("users", {})
 
-    # سوییچ کردن بین دو حالت root و current_node
     old_mode = users.get(user_id, {}).get("search_mode", "root")
+
+    # toggle
     new_mode = "current_node" if old_mode == "root" else "root"
 
     users[user_id]["search_mode"] = new_mode
 
-    # 💡 ذخیره تغییرات و آپلود فوری فایل در تلگرام
+    # ذخیره + آپلود
     save_userdata(userdata, upload=True)
 
     if new_mode == "root":
         await update.message.reply_text(
-            "🌍 حالت جستجو به <b>«کل کتابخانه (General Search)»</b> تغییر یافت.\n"
-            "از این پس عبارات شما در تمام پوشه‌ها جستجو خواهند شد.",
+            "🌍 حالت جستجو روی <b>General Search</b> قرار گرفت.\n"
+            "از این به بعد جستجو در <b>کل کتابخانه</b> انجام می‌شود.",
             parse_mode="HTML"
         )
     else:
         current_node = context.user_data.get("current_node", "root")
+
         if current_node == "root":
             await update.message.reply_text(
-                "📂 حالت جستجو به <b>«پوشه فعلی (Current Folder Search)»</b> تغییر یافت.\n"
-                "⚠️ چون در حال حاضر در پوشه اصلی (Root) هستید، جستجو همچنان در کل کتابخانه انجام می‌شود.",
+                "📂 حالت جستجو روی <b>Current Folder Search</b> قرار گرفت.\n"
+                "الان شما در روت هستید، پس عملاً جستجو روی کل ساختار روت انجام می‌شود.",
                 parse_mode="HTML"
             )
         else:
             await update.message.reply_text(
-                "📂 حالت جستجو به <b>«پوشه فعلی (Current Folder Search)»</b> تغییر یافت.\n"
-                "از این پس نتایج فقط از پوشه فعلی و زیرشاخه‌های آن استخراج می‌شوند.",
+                "📂 حالت جستجو روی <b>Current Folder Search</b> قرار گرفت.\n"
+                "از این به بعد جستجو فقط در <b>پوشه فعلی و زیرشاخه‌های آن</b> انجام می‌شود.",
                 parse_mode="HTML"
             )
 
     return CHOOSING
-
-def get_user_search_mode(user_id: int) -> str:
-    userdata = load_userdata()
-    return userdata.get("users", {}).get(str(user_id), {}).get("search_mode", "root")
 
 async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
