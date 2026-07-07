@@ -37,11 +37,9 @@ from telegram.ext import (
     filters,
     ConversationHandler,
     ApplicationHandlerStop,
-    MessageReactionHandler,
-    Application
+    MessageReactionHandler
 )
 
-import time
 import copy
 from flask import Flask
 import threading
@@ -54,7 +52,6 @@ from smart_search import smart_search
 from html import escape
 from telegram.ext import MessageReactionHandler
 from telegram import MessageReactionUpdated
-from zoneinfo import ZoneInfo
 
 
 def delete_node_recursive(db, node_id):
@@ -90,7 +87,7 @@ def push_admin_history(context, db):
 
 # ------ DEFAULT_START_TEXT -------
 DEFAULT_START_TEXT = """🕊 به ربات کتابخانه دانشگاه خوش آمدید."""
-RESTART_NOTIFY_FILE = "last_restart_notify.txt"
+
 # --- wewb port ---
 PORT = int(os.environ.get("PORT", 10000))
 
@@ -435,7 +432,7 @@ def save_userdata(data, upload=True):
 
     return True
 
-def track_user_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, count_message=True):
+def track_user_activity(update: Update, count_message=True):
     """
     ثبت اطلاعات کاربران داخل userdata:
     - نام
@@ -443,9 +440,7 @@ def track_user_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, coun
     - آیدی عددی
     - تعداد پیام‌ها / دستورها
     - وضعیت بن
-    - حفظ سایر تنظیمات مثل smart_search_disabledو favorites_disabled
-    - ذخیره current_node
-    - ثبت زمان آخرین فعالیت
+    - حفظ سایر تنظیمات مثل smart_search_disabled
     """
 
     user = update.effective_user
@@ -478,15 +473,11 @@ def track_user_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, coun
     user_record["banned"] = bool(old_data.get("banned", False))
     user_record["first_seen"] = old_data.get("first_seen") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user_record["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    user_record["last_activity_ts"] = int(time.time())
-    user_record["smart_search_disabled"] = old_data.get("smart_search_disabled", False)
-    user_record["favorites_disabled"] = old_data.get("favorites_disabled", False)
 
-    current_node = context.user_data.get("current_node")
-    if current_node is not None:
-        user_record["current_node"] = current_node
-    else:
-        user_record["current_node"] = old_data.get("current_node", "root")
+    # اگر از قبل وجود نداشت، پیش‌فرض سرچ هوشمند را روشن نگه دار
+    user_record["smart_search_disabled"] = old_data.get("smart_search_disabled", False)
+    # اگر از قبل وجود نداشت، پوشه دلخواه فعال باشد
+    user_record["favorites_disabled"] = old_data.get("favorites_disabled", False)
 
     users[user_id] = user_record
 
@@ -498,65 +489,6 @@ def track_user_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, coun
     should_upload = (old_count == 0) or (new_count % 10 == 0)
 
     save_userdata(userdata, upload=should_upload)
-    schedule_inactive_upload(context, user.id)
-
-async def upload_userdata_if_user_inactive(context: ContextTypes.DEFAULT_TYPE):
-    job = context.job
-    user_id = str(job.data["user_id"])
-
-    userdata = load_userdata()
-    user_record = userdata.get("users", {}).get(user_id, {})
-    last_activity_ts = int(user_record.get("last_activity_ts", 0))
-    now_ts = int(time.time())
-
-    if now_ts - last_activity_ts >= 10:
-        print(f"📤 User {user_id} inactive for 60 seconds. Uploading userdata...")
-        save_userdata(userdata, upload=True)
-
-def schedule_inactive_upload(context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    if context.job_queue is None:
-        return
-
-    job_name = f"inactive_upload_{user_id}"
-
-    for job in context.job_queue.get_jobs_by_name(job_name):
-        job.schedule_removal()
-
-    context.job_queue.run_once(
-        upload_userdata_if_user_inactive,
-        when=60,
-        data={"user_id": user_id},
-        name=job_name
-    )
-
-def get_saved_current_node(user_id, default=None):
-    userdata = load_userdata()
-    users = userdata.get("users", {})
-    user_record = users.get(str(user_id), {})
-
-    node_id = user_record.get("current_node", default)
-    if node_id is None:
-        return default
-
-    db = load_db()
-    if node_id not in db:
-        return default
-
-    return node_id
-
-
-async def restore_current_node_if_missing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not user:
-        return
-
-    if "current_node" in context.user_data:
-        return
-
-    saved_node = get_saved_current_node(user.id, default=None)
-    if saved_node is not None:
-        context.user_data["current_node"] = saved_node
-
 
 def is_user_banned(user_id: int) -> bool:
     userdata = load_userdata()
@@ -1404,7 +1336,7 @@ async def send_pending_report(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=False)
+    track_user_activity(update, count_message=False)
 
     user = update.effective_user
     user_id = user.id
@@ -1579,7 +1511,7 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return CHOOSING
 
 async def receive_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=False)
+    track_user_activity(update, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -1599,7 +1531,7 @@ async def receive_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def report_without_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=False)
+    track_user_activity(update, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -1618,7 +1550,7 @@ async def report_without_message(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def cancel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=False)
+    track_user_activity(update, count_message=False)
 
     clear_pending_report(context)
     await update.message.reply_text("❌ ارسال گزارش لغو شد.")
@@ -1664,7 +1596,7 @@ async def send_single_content_by_item(message, item):
     return None
 
 async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=False)
+    track_user_activity(update, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -1805,7 +1737,7 @@ async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 async def start_chat_with_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=False)
+    track_user_activity(update, count_message=False)
 
     user = update.effective_user
     user_id = user.id
@@ -2088,7 +2020,7 @@ async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TY
     هندلر دریافت مستقیم فایل با متن ساده:
     file-id:FILE_ID
     """
-    track_user_activity(update, context, count_message=True)
+    track_user_activity(update, count_message=True)
     user_id = update.effective_user.id
     if is_user_banned(user_id):
         await update.message.reply_text("⛔️ شما بن شده‌اید.")
@@ -2154,7 +2086,7 @@ async def handle_direct_getfile(update: Update, context: ContextTypes.DEFAULT_TY
     raise ApplicationHandlerStop
 
 async def file_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=False)
+    track_user_activity(update, count_message=False)
 
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -2583,10 +2515,10 @@ def get_subtree_db(db, root_node_id):
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
     current_node = context.user_data.get("current_node", "root")
-
+    
     # محدود کردن جستجو فقط به زیرشاخه فعلی
     subtree_db = get_subtree_db(full_db, current_node)
-
+    
     # جستجو در زیرشاخه
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
@@ -2598,11 +2530,11 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             f"""🔍 نتیجه‌ای در این پوشه یافت نشد.
         
-⚠️ توجه!
-فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
-برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
-
-{help_text}""",
+        ⚠️ توجه!
+        فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
+        برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
+        
+        {help_text}""",
             parse_mode="HTML"
         )
         return CHOOSING
@@ -2612,78 +2544,26 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     for item in results:
         node_id = item["node_id"]
-
-        # مسیر لینک‌دار؛ هر بخش از مسیر، لینک خودِ همان پوشه را دارد
-        path_html = get_node_path_html(full_db, node_id, bot_username)
-
-        msg += f"📂 {path_html}\n"
+        # دریافت مسیر کامل از دیتابیس اصلی
+        path_text = get_node_path_text(full_db, node_id)
+        
+        # ساخت دیپ‌لینک
+        deep_link = f"https://t.me/{bot_username}?start={node_id}"
+        
+        # فرمت‌دهی با لینک HTML (قابل کلیک)
+        msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
-    msg += "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n"
+    msg += " 🪄 روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید. \n"
     msg += help_text
 
     await update.message.reply_text(
-        msg,
-        parse_mode="HTML",
+        msg, 
+        parse_mode="HTML", 
         disable_web_page_preview=True
     )
 
     return CHOOSING
-
-
-# اسمارت سرچ با یک لینک روی هر مسیر
-#async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
-#    full_db = load_db()
-#    current_node = context.user_data.get("current_node", "root")
-#    
-#    # محدود کردن جستجو فقط به زیرشاخه فعلی
-#    subtree_db = get_subtree_db(full_db, current_node)
-#    
-#    # جستجو در زیرشاخه
-#    results = smart_search(subtree_db, text, limit=5, min_score=45)
-#
-#    help_text = (
-#        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
-#    )
-#
-#    if not results:
-#        await update.message.reply_text(
-#            f"""🔍 نتیجه‌ای در این پوشه یافت نشد.
-#        
-#        ⚠️ توجه!
-#        فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
-#        برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
-#        
-#        {help_text}""",
-#            parse_mode="HTML"
-#        )
-#        return CHOOSING
-#
-#    bot_username = context.bot.username
-#    msg = "🔍 نتایج یافت شده در این پوشه:\n\n"
-#
-#    for item in results:
-#        node_id = item["node_id"]
-#        # دریافت مسیر کامل از دیتابیس اصلی
-#        path_text = get_node_path_text(full_db, node_id)
-#        
-#        # ساخت دیپ‌لینک
-#        deep_link = f"https://t.me/{bot_username}?start={node_id}"
-#        
-#        # فرمت‌دهی با لینک HTML (قابل کلیک)
-#        msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
-#        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
-#
-#    msg += " 🪄 روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید. \n"
-#    msg += help_text
-#
-#    await update.message.reply_text(
-#        msg, 
-#        parse_mode="HTML", 
-#        disable_web_page_preview=True
-#    )
-#
-#    return CHOOSING
 
 async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -2697,7 +2577,7 @@ async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     # اگر کاربر در دیتابیس نبود، ابتدا او را ثبت یا داده‌ی پیش‌فرض می‌گذاریم
     if user_id not in users:
         # برای ثبت مشخصات اولیه
-        track_user_activity(update, context, count_message=False)
+        track_user_activity(update, count_message=False)
         userdata = load_userdata()  # بازخوانی دیتای جدید
         users = userdata.get("users", {})
 
@@ -2720,47 +2600,6 @@ async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     return CHOOSING
 
 # --- HANDLERS ---
-
-async def notify_admins_on_restart(application: Application):
-    now_ts = int(time.time())
-
-    # جلوگیری از پیام تکراری در ری‌استارت‌های چندباره
-    if os.path.exists(RESTART_NOTIFY_FILE):
-        try:
-            with open(RESTART_NOTIFY_FILE, "r", encoding="utf-8") as f:
-                last_ts = int(f.read().strip() or "0")
-
-            if now_ts - last_ts < 30:
-                return
-        except Exception:
-            pass
-
-    with open(RESTART_NOTIFY_FILE, "w", encoding="utf-8") as f:
-        f.write(str(now_ts))
-
-    userdata = load_userdata()
-
-    admin_ids = set(str(aid) for aid in ADMIN_IDS)
-    admin_ids.update(str(aid) for aid in userdata.get("sub_admins", []))
-
-    now = datetime.now(ZoneInfo("Asia/Tehran")).strftime("%Y/%m/%d - %H:%M:%S")
-
-    message = (
-        "♻️ ربات ری‌استارت شد.\n\n"
-        f"🕒 زمان: {now}\n"
-        "✅ وضعیت: ربات دوباره آنلاین شد."
-    )
-
-    for aid in admin_ids:
-        try:
-            await application.bot.send_message(
-                chat_id=int(aid),
-                text=message
-            )
-        except Exception as e:
-            print(f"Failed to notify admin {aid}: {e}")
-
-
 async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if is_user_banned(user_id):
@@ -2783,7 +2622,7 @@ async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=True)
+    track_user_activity(update, count_message=True)
     user_id = update.effective_user.id
     if is_user_banned(user_id):
         await update.message.reply_text(
@@ -2947,7 +2786,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_start_page(update, context)
     return CHOOSING
 
-# ========= خارج کردن پیام start  از هاردکد============
+# ========= خارج کردن پیام start  از هاردکد==============
 
 def get_start_page_contents():
     userdata = load_userdata()
@@ -4113,47 +3952,8 @@ def find_nearest_valid_node(db, target_node_id):
             
     return "root"
 
-async def resume_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return ConversationHandler.END
-
-    # اگر از قبل current_node داخل سشن هست، یعنی کاربر قبلاً وارد جریان شده
-    if "current_node" in context.user_data:
-        return await handle_navigation(update, context)
-
-    user = update.effective_user
-    if not user:
-        return ConversationHandler.END
-
-    # (اختیاری ولی توصیه‌شده) بن را همینجا هم چک کن
-    if is_user_banned(user.id):
-        await update.message.reply_text(
-            "⛔️ شما از ربات بن شدید و امکان استفاده از ربات را ندارید.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return ConversationHandler.END
-
-    user_id = str(user.id)
-    userdata = load_userdata()
-    user_record = userdata.get("users", {}).get(user_id, {})
-
-    # شرط اصلی: باید current_node در بکاپ وجود داشته باشد
-    saved_node = user_record.get("current_node")
-    if not saved_node:
-        # یعنی کاربر هیچ‌وقت استارت نزده/رکورد معتبر ندارد → مجبور به /start
-        return ConversationHandler.END
-
-    ## restore
-    #context.user_data["current_node"] = saved_node
-    #context.user_data["smart_search_disabled"] = user_record.get("smart_search_disabled", False)
-    #context.user_data["favorites_disabled"] = user_record.get("favorites_disabled", False)
-    #set_report_page(context, context.user_data["current_node"])
-
-    # همان پیام فعلی را هم پردازش کن
-    return await handle_navigation(update, context)
-
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    track_user_activity(update, context, count_message=True)
+    track_user_activity(update, count_message=True)
     text = update.message.text
 
     # 🛑 اگر پیام مربوط به دریافت مستقیم فایل بود، پردازش ناوبری را متوقف کن
@@ -4242,7 +4042,6 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🏠 صفحه اصلی":
         context.user_data['current_node'] = 'root'
         set_report_page(context, "root")
-        track_user_activity(update, context, count_message=False)
         await update.message.reply_text("به صفحه اصلی بازگشتید.", reply_markup=get_keyboard('root', is_admin, user_id=user_id))
         return CHOOSING
     
@@ -4253,7 +4052,6 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_node = parent if parent else "root"
         context.user_data["current_node"] = target_node
         set_report_page(context, target_node)
-        track_user_activity(update, context, count_message=False)
     
         if target_node == "root":
             return_message = "🏠 خانه"
@@ -4836,7 +4634,6 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
             # 👑 ادمین یا دکمه دارای فرزند
             context.user_data['current_node'] = child_id
-            track_user_activity(update, context, count_message=False)
     
             await update.message.reply_text(
                 f"📂 {child_node['name']}\n"
@@ -5886,12 +5683,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 def build_application():
-    application = (
-        Application.builder()
-        .token(TOKEN)
-        .post_init(notify_admins_on_restart)
-        .build()
-    )
+    application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(
         MessageHandler(
@@ -5916,11 +5708,6 @@ def build_application():
         )
 
     application.add_handler(
-        MessageHandler(filters.ALL, restore_current_node_if_missing),
-        group=-2
-    )
-    
-    application.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), not_started),
         group=0
     )
@@ -5932,12 +5719,7 @@ def build_application():
     )
 
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            # این هندلر برای کاربرانی که قبلا استارت زده‌اند، مثل یک میانبر عمل می‌کند
-            MessageHandler(filters.TEXT & (~filters.COMMAND), resume_conversation),
-        ],
-        # ... بقیه stateها و fallbacks تغییری نمی‌کنند ...
+        entry_points=[CommandHandler("start", start)],
         states={
             CHOOSING: [
                 CommandHandler("report", report_page),
