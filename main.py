@@ -2854,14 +2854,14 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not results:
         if search_mode == "current_node":
             not_found_text = (
-                "🔍 نتیجه‌ای در <b>Current Folde Search</b> یافت نشد.\n\n"
+                "🔍 نتیجه‌ای در <b>Current Folder Search</b> یافت نشد.\n\n"
                 "⚠️ توجه!\n"
                 "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شده است.\n"
                 "اگر می‌خواهید در کل کتابخانه جستجو شود، /search_mode را بزنید."
             )
         else:
             not_found_text = (
-                "🔍 نتیجه‌ای در<b>General Search</b> یافت نشد.\n\n"
+                "🔍 نتیجه‌ای در <b>General Search</b> یافت نشد.\n\n"
                 "جستجو در کل کتابخانه انجام شد اما نتیجه‌ای پیدا نشد."
             )
 
@@ -2874,9 +2874,9 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     bot_username = context.bot.username
 
     msg = (
-        f"🔎 <b>{mode_titl}</b>\n"
+        f"🔎 <b>{mode_title}</b>\n"
         f"{mode_desc}\n\n"
-        f"🔍 نتایج اصل یافت شده:\n\n"
+        f"🔍 نتایج اصلی یافت شده:\n\n"
     )
 
     # ۵ نتیجه اول
@@ -2887,7 +2887,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     # ۱۰ نتیجه بعدی
     extra_results = results[5:15]
     if extra_results:
-        msg += "📋 <b>نتایج بیشتر:<b>\n"
+        msg += "📋 <b>نتایج بیشتر:</b>\n"
         msg += "<blockquote expandable>\n"
         for item in extra_results:
             msg += render_search_result(item, full_db, bot_username)
@@ -2902,10 +2902,12 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(
         msg,
-        parse_mode="HTML",        disable_web_page_preview=True
+        parse_mode="HTML",
+        disable_web_page_preview=True
     )
 
     return CHOOSING
+
 
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
