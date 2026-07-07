@@ -2738,101 +2738,41 @@ def get_subtree_db(db, root_node_id):
 
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
-
-    user = update.effective_user
-    if not user:
-        return CHOOSING
-
-    user_id = str(user.id)
     current_node = context.user_data.get("current_node", "root")
-
+    
+    # تعیین محدوده جستجو بر اساس تنظیمات کاربر
     userdata = load_userdata()
-    users = userdata.setdefault("users", {})
+    user_id = str(update.effective_user.id)
+    search_mode = userdata.get("users", {}).get(user_id, {}).get("search_mode", "root")
+    search_root = current_node if search_mode == "current_node" else "root"
 
-    if user_id not in users:
-        track_user_activity(update, count_message=False)
-        userdata = load_userdata()
-        users = userdata.setdefault("users", {})
-
-    search_mode = users.get(user_id, {}).get("search_mode", "root")
-
-    if search_mode == "current_node":
-        search_root = current_node
-        mode_title = "Current Folder Search"
-        mode_desc = "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شد."
-    else:
-        search_root = "root"
-        mode_title = "General Search"
-        mode_desc = "جستجو در کل کتابخانه انجام شد."
-
-    # اجرای جستجوی هوشمند در پوشه هدف
-    results = smart_search(full_db, text, root_node_id=search_root, limit=7, min_score=40)
-
-    help_text = (
-        "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
-        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
-    )
+    # فراخوانی سرچ هوشمند جدید
+    results = smart_search(full_db, text, root_node_id=search_root)
 
     if not results:
-        if search_mode == "current_node":
-            not_found_text = (
-                "🔍 نتیجه‌ای در <b>Current Folder Search</b> یافت نشد.\n\n"
-                "⚠️ توجه!\n"
-                "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شده است.\n"
-                "اگر می‌خواهید در کل کتابخانه جستجو شود، /search_mode را بزنید."
-            )
-        else:
-            not_found_text = (
-                "🔍 نتیجه‌ای در <b>General Search</b> یافت نشد.\n\n"
-                "جستجو در کل کتابخانه انجام شد اما نتیجه‌ای پیدا نشد."
-            )
-
-        await update.message.reply_text(
-            f"{not_found_text}\n\n{help_text}",
-            parse_mode="HTML"
-        )
+        await update.message.reply_text("🔍 نتیجه‌ای یافت نشد.")
         return CHOOSING
 
     bot_username = context.bot.username
-
-    msg = (
-        f"🔎 <b>{mode_title}</b>\n"
-        f"{mode_desc}\n\n"
-        f"🔍 نتایج یافت شده:\n\n"
-    )
+    msg = f"🔎 <b>نتایج جستجو:</b>\n\n"
 
     for item in results:
-        node_id = item["node_id"]
-        result_type = item["result_type"]
-        title = item["title"]
-        path = item["path"]
-        score = int(item["score"])
-
-        if result_type == "node":
-            # دیپ لینک هدایت به پوشه
-            deep_link = f"https://t.me/{bot_username}?start={node_id}"
-            msg += f"📂 <b><a href='{deep_link}'>{title}</a></b>\n"
-            msg += f"📍 مسیر: <i>{path}</i>\n"
+        score = int(item['score'])
+        path_text = item['path']
+        
+        if item["type"] == "node":
+            # لینک به پوشه
+            link = f"https://t.me/{bot_username}?start={item['id']}"
+            msg += f"📂 <b><a href='{link}'>{item['title']}</a></b>\n"
         else:
-            # دیپ لینک اختصاصی فایل (با پیشوند file_)
-            content_index = item["content_index"]
-            deep_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-            msg += f"📄 <b><a href='{deep_link}'>{title}</a></b> [فایل]\n"
-            msg += f"📍 مسیر: <i>{path}</i>\n"
-            
-        msg += f"🎯 درصد تطابق: {score}٪\n\n"
+            # دیپ‌لینک به فایل مستقیم
+            link = f"https://t.me/{bot_username}?start=file_{item['id']}_{item['content_index']}"
+            msg += f"📄 <b><a href='{link}'>{item['title']}</a></b> (فایل)\n"
+        
+        msg += f"📍 مسیر: <code>{path_text}</code>\n"
+        msg += f"🎯 تطابق: {score}٪\n\n"
 
-    msg += (
-        "🪄 روی نتایج آبی‌رنگ کلیک کنید تا مستقیم به فایل یا پوشه مربوطه منتقل شوید.\n\n"
-        f"{help_text}"
-    )
-
-    await update.message.reply_text(
-        msg,
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
-
+    await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
     return CHOOSING
 
 
@@ -5543,7 +5483,6 @@ def extract_message_content(msg):
         return {
             "type": "photo",
             "file_id": msg.photo[-1].file_id,
-            "file_name": "Image File", # عکس‌ها معمولاً فاقد نام فایل متنی هستند
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5553,7 +5492,6 @@ def extract_message_content(msg):
         return {
             "type": "video",
             "file_id": msg.video.file_id,
-            "file_name": msg.video.file_name if hasattr(msg.video, 'file_name') else "Video File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5563,7 +5501,6 @@ def extract_message_content(msg):
         return {
             "type": "document",
             "file_id": msg.document.file_id,
-            "file_name": msg.document.file_name if hasattr(msg.document, 'file_name') else "Document File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5573,7 +5510,6 @@ def extract_message_content(msg):
         return {
             "type": "audio",
             "file_id": msg.audio.file_id,
-            "file_name": msg.audio.file_name if hasattr(msg.audio, 'file_name') else "Audio File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5583,7 +5519,6 @@ def extract_message_content(msg):
         return {
             "type": "voice",
             "file_id": msg.voice.file_id,
-            "file_name": "Voice File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5593,7 +5528,6 @@ def extract_message_content(msg):
         return {
             "type": "animation",
             "file_id": msg.animation.file_id,
-            "file_name": msg.animation.file_name if hasattr(msg.animation, 'file_name') else "Animation File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5603,7 +5537,6 @@ def extract_message_content(msg):
         return {
             "type": "video_note",
             "file_id": msg.video_note.file_id,
-            "file_name": "Video Note",
             "media_group_id": media_group_id,
         }
 
@@ -5611,7 +5544,6 @@ def extract_message_content(msg):
         return {
             "type": "sticker",
             "file_id": msg.sticker.file_id,
-            "file_name": "Sticker",
             "media_group_id": media_group_id,
         }
 
