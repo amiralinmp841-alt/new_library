@@ -4071,6 +4071,45 @@ def find_nearest_valid_node(db, target_node_id):
             
     return "root"
 
+async def resume_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return ConversationHandler.END
+
+    # اگر از قبل current_node داخل سشن هست، یعنی کاربر قبلاً وارد جریان شده
+    if "current_node" in context.user_data:
+        return await handle_navigation(update, context)
+
+    user = update.effective_user
+    if not user:
+        return ConversationHandler.END
+
+    # (اختیاری ولی توصیه‌شده) بن را همینجا هم چک کن
+    if is_user_banned(user.id):
+        await update.message.reply_text(
+            "⛔️ شما از ربات بن شدید و امکان استفاده از ربات را ندارید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return ConversationHandler.END
+
+    user_id = str(user.id)
+    userdata = load_userdata()
+    user_record = userdata.get("users", {}).get(user_id, {})
+
+    # شرط اصلی: باید current_node در بکاپ وجود داشته باشد
+    saved_node = user_record.get("current_node")
+    if not saved_node:
+        # یعنی کاربر هیچ‌وقت استارت نزده/رکورد معتبر ندارد → مجبور به /start
+        return ConversationHandler.END
+
+    ## restore
+    #context.user_data["current_node"] = saved_node
+    #context.user_data["smart_search_disabled"] = user_record.get("smart_search_disabled", False)
+    #context.user_data["favorites_disabled"] = user_record.get("favorites_disabled", False)
+    #set_report_page(context, context.user_data["current_node"])
+
+    # همان پیام فعلی را هم پردازش کن
+    return await handle_navigation(update, context)
+
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_user_activity(update, context, count_message=True)
     text = update.message.text
@@ -5846,7 +5885,12 @@ def build_application():
     )
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            # این هندلر برای کاربرانی که قبلا استارت زده‌اند، مثل یک میانبر عمل می‌کند
+            MessageHandler(filters.TEXT & (~filters.COMMAND), resume_conversation),
+        ],
+        # ... بقیه stateها و fallbacks تغییری نمی‌کنند ...
         states={
             CHOOSING: [
                 CommandHandler("report", report_page),
