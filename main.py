@@ -2834,11 +2834,12 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     # بلاک نتایج بیشتر
     if more_results:
         msg += "📋 نتایج بیشتر:\n"
-        more_block = "<blockquote         for item in more_results:
+        more_block = "<blockquote expandable>"
+        for item in more_results:
             node_id = item["node_id"]
             path_html = get_node_path_html(full_db, node_id, bot_username)
             more_block += f"📂 {path_html}\n"
-            more_block += f"درصد تطابق: {in(item['score'])}٪\n\n"
+            more_block += f"درصد تطابق: {int(item['score'])}٪\n\n"
         more_block = more_block.rstrip() + "</blockquote>"
         msg += more_block + "\n\n"
 
