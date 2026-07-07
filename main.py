@@ -2749,16 +2749,13 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
-    # اگر کاربر در userdata نبود، ثبت اولیه شود
     if user_id not in users:
         track_user_activity(update, count_message=False)
         userdata = load_userdata()
         users = userdata.setdefault("users", {})
 
-    # دیفالت = root
     search_mode = users.get(user_id, {}).get("search_mode", "root")
 
-    # تعیین محدوده جستجو
     if search_mode == "current_node":
         search_root = current_node
         mode_title = "Current Folder Search"
@@ -2770,7 +2767,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     subtree_db = get_subtree_db(full_db, search_root)
 
-    # دریافت تا ۱۵ نتیجه برای تفکیک ۵ تا اول و ۱۰ تا دوم
+    # 15 نتیجه: 5 تای اول + 10 تای بعدی
     results = smart_search(subtree_db, text, limit=15, min_score=45)
 
     help_text = (
@@ -2805,12 +2802,10 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = (
         f"🔎 <b>{mode_title}</b>\n"
         f"{mode_desc}\n\n"
-        f"🔍 نتایج اصلی یافت شده:\n\n"
+        f"🔍 نتایج یافت شده:\n\n"
     )
 
-    # ۵ نتیجه اول
-    top_results = results[:5]
-    for item in top_results:
+    def render_result(item):
         node_id = item["node_id"]
         path_html = get_node_path_html(full_db, node_id, bot_username)
 
@@ -2818,32 +2813,29 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
             file_title = html.escape(item.get("title", "فایل بدون نام"))
             content_index = item.get("content_index")
             file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-            msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
+            return (
+                f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
+                f"درصد تطابق: {int(item['score'])}٪\n\n"
+            )
         else:
-            msg += f"📂 {path_html}\n"
+            return (
+                f"📂 {path_html}\n"
+                f"درصد تطابق: {int(item['score'])}٪\n\n"
+            )
 
-        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+    # 5 نتیجه اول
+    for item in results[:5]:
+        msg += render_result(item)
 
-    # ۱۰ نتیجه بعدی (رتبه‌های ۶ تا ۱۵) در قالب بلاک‌کوت جمع‌شونده (expandable)
+    # 10 نتیجه بعدی داخل blockquote expandable
     extra_results = results[5:15]
     if extra_results:
-        msg += "📋 <b>نتایج بیشتر:</b>\n"
         msg += "<blockquote expandable>\n"
         for item in extra_results:
-            node_id = item["node_id"]
-            path_html = get_node_path_html(full_db, node_id, bot_username)
-
-            if item.get("result_type") == "content":
-                file_title = html.escape(item.get("title", "فایل بدون نام"))
-                content_index = item.get("content_index")
-                file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-                msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
-            else:
-                msg += f"📂 {path_html}\n"
-
-            msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+            msg += render_result(item)
         msg += "</blockquote>\n"
 
+    # پیام مسیر به تنهایی در blockquote عادی
     msg += (
         "<blockquote>"
         "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید."
@@ -2858,6 +2850,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     return CHOOSING
+
 
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
