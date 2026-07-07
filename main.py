@@ -2736,6 +2736,77 @@ def get_subtree_db(db, root_node_id):
     add_node_recursive(root_node_id)
     return subtree
 
+import html
+
+def get_search_result_title(full_db, node_id, content_index):
+    """
+    عنوان مناسب برای نمایش نتیجه جستجو را مستقیم از دیتابیس می‌سازد.
+    - برای text: فقط تعداد محدودی از اول متن را برمی‌گرداند
+    - برای فایل‌ها: file_name را ترجیح می‌دهد
+    """
+    node = full_db.get(node_id, {})
+    contents = node.get("contents", [])
+
+    if not isinstance(content_index, int) or not (0 <= content_index < len(contents)):
+        return "فایل بدون نام"
+
+    item = contents[content_index]
+    item_type = item.get("type")
+
+    # فقط برای متن: بخشی از متن را به عنوان عنوان نمایش بده
+    if item_type == "text":
+        raw_text = item.get("text", "") or ""
+        clean_text = " ".join(raw_text.split())  # حذف \n و فاصله‌های اضافه
+
+        if not clean_text:
+            return "محتوای متنی"
+
+        limit = 70
+        if len(clean_text) > limit:
+            return clean_text[:limit].rstrip() + "..."
+        return clean_text
+
+    # برای بقیه فایل‌ها: اسم فایل را از دیتابیس بگیر
+    title = (
+        item.get("file_name")
+        or item.get("title")
+        or item.get("caption")
+        or "فایل بدون نام"
+    )
+
+    title = " ".join(str(title).split())
+
+    if len(title) > 70:
+        title = title[:70].rstrip() + "..."
+
+    return title
+
+
+def render_search_result(item, full_db, bot_username):
+    """
+    هر نتیجه جستجو را به HTML قابل نمایش در تلگرام تبدیل می‌کند.
+    """
+    node_id = item["node_id"]
+    path_html = get_node_path_html(full_db, node_id, bot_username)
+    score = int(item.get("score", 0))
+
+    if item.get("result_type") == "content":
+        content_index = item.get("content_index")
+        file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
+
+        raw_title = get_search_result_title(full_db, node_id, content_index)
+        safe_title = html.escape(raw_title)
+
+        return (
+            f"📄 {path_html} / <a href='{file_link}'>{safe_title}</a>\n"
+            f"درصد تطابق: {score}٪\n\n"
+        )
+
+    return (
+        f"📂 {path_html}\n"
+        f"درصد تطابق: {score}٪\n\n"
+    )
+
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
 
@@ -2749,13 +2820,16 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
+    # اگر کاربر در userdata نبود، ثبت اولیه شود
     if user_id not in users:
         track_user_activity(update, count_message=False)
         userdata = load_userdata()
         users = userdata.setdefault("users", {})
 
+    # دیفالت = root
     search_mode = users.get(user_id, {}).get("search_mode", "root")
 
+    # تعیین محدوده جستجو
     if search_mode == "current_node":
         search_root = current_node
         mode_title = "Current Folder Search"
@@ -2767,7 +2841,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     subtree_db = get_subtree_db(full_db, search_root)
 
-    # 15 نتیجه: 5 تای اول + 10 تای بعدی
+    # دریافت تا ۱۵ نتیجه برای تفکیک ۵ تا اول و ۱۰ تا دوم
     results = smart_search(subtree_db, text, limit=15, min_score=45)
 
     help_text = (
@@ -2777,17 +2851,17 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         "</blockquote>"
     )
 
-    if not results:
+    if not res:
         if search_mode == "current_node":
             not_found_text = (
-                "🔍 نتیجه‌ای در <b>Current Folder Search</b> یافت نشد.\n\n"
+                "🔍 نتیجه‌ای در <b>Current Folde Search</b> یافت نشد.\n\n"
                 "⚠️ توجه!\n"
                 "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شده است.\n"
                 "اگر می‌خواهید در کل کتابخانه جستجو شود، /search_mode را بزنید."
             )
         else:
             not_found_text = (
-                "🔍 نتیجه‌ای در <b>General Search</b> یافت نشد.\n\n"
+                "🔍 نتیجه‌ای در<b>General Search</b> یافت نشد.\n\n"
                 "جستجو در کل کتابخانه انجام شد اما نتیجه‌ای پیدا نشد."
             )
 
@@ -2800,42 +2874,25 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     bot_username = context.bot.username
 
     msg = (
-        f"🔎 <b>{mode_title}</b>\n"
+        f"🔎 <b>{mode_titl}</b>\n"
         f"{mode_desc}\n\n"
-        f"🔍 نتایج یافت شده:\n\n"
+        f"🔍 نتایج اصل یافت شده:\n\n"
     )
 
-    def render_result(item):
-        node_id = item["node_id"]
-        path_html = get_node_path_html(full_db, node_id, bot_username)
+    # ۵ نتیجه اول
+    top_results = results[:5]
+    for item in top_results:
+        msg += render_search_result(item, full_db, bot_username)
 
-        if item.get("result_type") == "content":
-            file_title = html.escape(item.get("title", "فایل بدون نام"))
-            content_index = item.get("content_index")
-            file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-            return (
-                f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
-                f"درصد تطابق: {int(item['score'])}٪\n\n"
-            )
-        else:
-            return (
-                f"📂 {path_html}\n"
-                f"درصد تطابق: {int(item['score'])}٪\n\n"
-            )
-
-    # 5 نتیجه اول
-    for item in results[:5]:
-        msg += render_result(item)
-
-    # 10 نتیجه بعدی داخل blockquote expandable
+    # ۱۰ نتیجه بعدی
     extra_results = results[5:15]
     if extra_results:
+        msg += "📋 <b>نتایج بیشتر:<b>\n"
         msg += "<blockquote expandable>\n"
         for item in extra_results:
-            msg += render_result(item)
+            msg += render_search_result(item, full_db, bot_username)
         msg += "</blockquote>\n"
 
-    # پیام مسیر به تنهایی در blockquote عادی
     msg += (
         "<blockquote>"
         "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید."
@@ -2845,12 +2902,10 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(
         msg,
-        parse_mode="HTML",
-        disable_web_page_preview=True
+        parse_mode="HTML",        disable_web_page_preview=True
     )
 
     return CHOOSING
-
 
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
