@@ -6012,7 +6012,7 @@ def build_application():
                 CommandHandler("file_id", file_id_command), # 👈 اضافه شدن کامند جدید به منو
                 CommandHandler("change", handle_reply_change),
                 CommandHandler("del", handle_reply_delete),
-                CommandHandler("style", set_custom_layout), 
+                #CommandHandler("style", set_custom_layout), 
                 #CommandHandler("clear", clear_favorites_cmd),
 
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
