@@ -2736,7 +2736,6 @@ def get_subtree_db(db, root_node_id):
     add_node_recursive(root_node_id)
     return subtree
 
-
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
 
@@ -2771,12 +2770,14 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     subtree_db = get_subtree_db(full_db, search_root)
 
-    # جستجو
-    results = smart_search(subtree_db, text, limit=5, min_score=45)
+    # دریافت تا ۱۵ نتیجه برای تفکیک ۵ تا اول و ۱۰ تا دوم
+    results = smart_search(subtree_db, text, limit=15, min_score=45)
 
     help_text = (
+        "<blockquote>"
         "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
         "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
+        "</blockquote>"
     )
 
     if not results:
@@ -2804,10 +2805,12 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = (
         f"🔎 <b>{mode_title}</b>\n"
         f"{mode_desc}\n\n"
-        f"🔍 نتایج یافت شده:\n\n"
+        f"🔍 نتایج اصلی یافت شده:\n\n"
     )
 
-    for item in results:
+    # ۵ نتیجه اول
+    top_results = results[:5]
+    for item in top_results:
         node_id = item["node_id"]
         path_html = get_node_path_html(full_db, node_id, bot_username)
 
@@ -2815,15 +2818,36 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
             file_title = html.escape(item.get("title", "فایل بدون نام"))
             content_index = item.get("content_index")
             file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-
             msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
         else:
             msg += f"📂 {path_html}\n"
 
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
+    # ۱۰ نتیجه بعدی (رتبه‌های ۶ تا ۱۵) در قالب بلاک‌کوت جمع‌شونده (expandable)
+    extra_results = results[5:15]
+    if extra_results:
+        msg += "📋 <b>نتایج بیشتر:</b>\n"
+        msg += "<blockquote expandable>\n"
+        for item in extra_results:
+            node_id = item["node_id"]
+            path_html = get_node_path_html(full_db, node_id, bot_username)
+
+            if item.get("result_type") == "content":
+                file_title = html.escape(item.get("title", "فایل بدون نام"))
+                content_index = item.get("content_index")
+                file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
+                msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
+            else:
+                msg += f"📂 {path_html}\n"
+
+            msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+        msg += "</blockquote>\n"
+
     msg += (
-        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n\n"
+        "<blockquote>"
+        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید."
+        "</blockquote>\n\n"
         f"{help_text}"
     )
 
