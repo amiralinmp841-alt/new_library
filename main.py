@@ -761,6 +761,35 @@ async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return CHOOSING
 
+def cleanup_node_layout(node: dict):
+    """
+    لایوت پوشه را با children سینک می‌کند:
+    - هر دکمه‌ای که دیگر در children نیست از layout حذف می‌شود
+    - ردیف‌های خالی حذف می‌شوند
+    - اگر layout خالی شد، کل فیلد layout حذف می‌شود
+    """
+    children = node.get("children", [])
+    layout = node.get("layout")
+
+    if not layout:
+        return
+
+    valid_children = set(children)
+    cleaned_layout = []
+
+    for row in layout:
+        if not isinstance(row, list):
+            continue
+        cleaned_row = [child_id for child_id in row if child_id in valid_children]
+        if cleaned_row:
+            cleaned_layout.append(cleaned_row)
+
+    if cleaned_layout:
+        node["layout"] = cleaned_layout
+    else:
+        node.pop("layout", None)
+
+
 async def set_row_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     userdata = load_userdata()
@@ -4632,7 +4661,10 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
                 # حذف از لیست فرزندان والد
                 db[current_node_id]['children'].remove(target_id)
-            
+
+                # پاکسازی چیدمان والد
+                cleanup_node_layout(db[current_node_id])
+                
                 # حذف بازگشتی کل درخت
                 delete_node_recursive(db, target_id)
 
