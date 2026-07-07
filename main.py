@@ -759,8 +759,7 @@ async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return CHOOSING
 
-
-async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_row_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     userdata = load_userdata()
     is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
@@ -768,20 +767,15 @@ async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin:
         return
 
-    text = update.message.text.strip()
-    lines = text.split("\n")
+    command = update.message.text.lower() # مثلا "/3"
     
-    # خط اول باید خود دستور باشد (مثلاً /style)
-    # بقیه خطوط شامل شماره‌ها هستند
-    if len(lines) < 2:
-        await update.message.reply_text(
-            "❌ فرمت دستور اشتباه است.\n"
-            "مثال:\n"
-            "/style\n"
-            "1 3\n"
-            "2 4\n"
-            "5"
-        )
+    # استخراج عدد از دستور
+    try:
+        count = int(command.replace("/", ""))
+        if not (1 <= count <= 6): # محدودیت منطقی بین 1 تا 6
+            raise ValueError
+    except:
+        await update.message.reply_text("❌ لطفاً عدد بین ۱ تا ۶ وارد کنید. مثال: /3")
         return
 
     current_node_id = context.user_data.get("current_node", "root")
@@ -791,78 +785,22 @@ async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ پوشه فعلی در دیتابیس پیدا نشد.")
         return
 
-    node = db[current_node_id]
-    children_ids = node.get("children", [])
-    
-    if not children_ids:
-        await update.message.reply_text("❌ این پوشه هیچ دکمه‌ای ندارد که چیدمان آن را تغییر دهید.")
-        return
-
-    # استخراج تمام شماره‌ها از خطوط فرستاده شده
-    layout_by_indices = []
-    used_indices = set()
-    invalid_found = False
-
-    for line in lines[1:]: # از خط دوم به بعد
-        line = line.strip()
-        if not line:
-            continue
-        row_indices = []
-        for num_str in line.split():
-            try:
-                idx = int(num_str) - 1 # تبدیل به index (شروع از 0)
-                if 0 <= idx < len(children_ids):
-                    row_indices.append(idx)
-                    used_indices.add(idx)
-                else:
-                    invalid_found = True
-            except ValueError:
-                invalid_found = True
-        if row_indices:
-            layout_by_indices.append(row_indices)
-
-    if invalid_found:
-        await update.message.reply_text(
-            f"❌ برخی شماره‌ها نامعتبر بودند. تعداد کل دکمه‌های این پوشه {len(children_ids)} عدد است."
-        )
-        return
-
-    # تبدیل ایندکس‌ها به IDهای واقعی پوشه‌ها
-    new_layout = []
-    for row in layout_by_indices:
-        row_ids = [children_ids[idx] for idx in row]
-        new_layout.append(row_ids)
-
-    # پیدا کردن دکمه‌هایی که ادمین در دستور وارد نکرده تا گم نشوند
-    missing_ids = [c_id for idx, c_id in enumerate(children_ids) if idx not in used_indices]
-    
-    # دکمه‌های فراموش شده را در ردیف‌های پیش‌فرض (مثلاً ۲ تایی) به انتهای لایوت اضافه می‌کنیم
-    if missing_ids:
-        # برای مثال هر ۲ تا دکمه فراموش شده در یک ردیف
-        for i in range(0, len(missing_ids), 2):
-            new_layout.append(missing_ids[i:i+2])
-
-    # همچنین ترتیب اصلی children را بر اساس این لایوت جدید مرتب می‌کنیم تا ترتیب فیزیکی دیتابیس هم درست بماند
-    ordered_children = []
-    for row in new_layout:
-        ordered_children.extend(row)
-    
-    # پشتیبانی از undo/redo
     push_admin_history(context, db)
-
-    # آپدیت دیتابیس
-    db[current_node_id]["layout"] = new_layout
-    db[current_node_id]["children"] = ordered_children
-
-    # لاگ‌گیری
+    
+    old_count = db[current_node_id].get("row_count", 2)
+    db[current_node_id]["row_count"] = count
+    
     bot_username = context.bot.username
-    node_name = node["name"]
+    node_name = db[current_node_id]["name"]
     node_link = get_link(current_node_id, node_name, bot_username)
     
-    desc = f"📐 چیدمان و ترتیب دکمه‌های پوشه {node_link} به صورت دستی بازنویسی شد."
+    desc = (
+        f"🔢 تعداد ستون‌های پوشه {node_link} "
+        f"از «{old_count}» به «{count}» تغییر کرد."
+    )
     
     log_caption = format_admin_log(update.effective_user, desc)
-    backup_caption = format_backup_caption(update.effective_user, "تغییر چیدمان سفارشی دکمه‌ها")
+    backup_caption = format_backup_caption(update.effective_user, "تغییر تعداد ستون دکمه‌ها")
     
     set_pending_caption(context, log_caption)
     set_pending_backup_caption(context, backup_caption)
@@ -870,9 +808,10 @@ async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_db(db, context=context)
 
     await update.message.reply_text(
-        "✅ چیدمان سفارشی دکمه‌ها با موفقیت اعمال شد.",
+        f"✅ تعداد ستون‌ها برای این پوشه به {count} تغییر یافت.",
         reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
     )
+
     return CHOOSING
 
 
