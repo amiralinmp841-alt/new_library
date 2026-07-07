@@ -53,6 +53,7 @@ from smart_search import smart_search
 from html import escape
 from telegram.ext import MessageReactionHandler
 from telegram import MessageReactionUpdated
+from zoneinfo import ZoneInfo
 
 
 def delete_node_recursive(db, node_id):
@@ -88,7 +89,7 @@ def push_admin_history(context, db):
 
 # ------ DEFAULT_START_TEXT -------
 DEFAULT_START_TEXT = """🕊 به ربات کتابخانه دانشگاه خوش آمدید."""
-
+RESTART_NOTIFY_FILE = "last_restart_notify.txt"
 # --- wewb port ---
 PORT = int(os.environ.get("PORT", 10000))
 
@@ -2719,6 +2720,47 @@ async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     return CHOOSING
 
 # --- HANDLERS ---
+
+async def notify_admins_on_restart(application: Application):
+    now_ts = int(time.time())
+
+    # جلوگیری از پیام تکراری در ری‌استارت‌های چندباره
+    if os.path.exists(RESTART_NOTIFY_FILE):
+        try:
+            with open(RESTART_NOTIFY_FILE, "r", encoding="utf-8") as f:
+                last_ts = int(f.read().strip() or "0")
+
+            if now_ts - last_ts < 30:
+                return
+        except Exception:
+            pass
+
+    with open(RESTART_NOTIFY_FILE, "w", encoding="utf-8") as f:
+        f.write(str(now_ts))
+
+    userdata = load_userdata()
+
+    admin_ids = set(str(aid) for aid in ADMIN_IDS)
+    admin_ids.update(str(aid) for aid in userdata.get("sub_admins", []))
+
+    now = datetime.now(ZoneInfo("Asia/Tehran")).strftime("%Y/%m/%d - %H:%M:%S")
+
+    message = (
+        "♻️ ربات ری‌استارت شد.\n\n"
+        f"🕒 زمان: {now}\n"
+        "✅ وضعیت: ربات دوباره آنلاین شد."
+    )
+
+    for aid in admin_ids:
+        try:
+            await application.bot.send_message(
+                chat_id=int(aid),
+                text=message
+            )
+        except Exception as e:
+            print(f"Failed to notify admin {aid}: {e}")
+
+
 async def not_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if is_user_banned(user_id):
