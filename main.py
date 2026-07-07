@@ -5888,7 +5888,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def build_application():
     application = (
         Application.builder()
-        .token(BOT_TOKEN)
+        .token(TOKEN)
         .post_init(notify_admins_on_restart)
         .build()
     )
