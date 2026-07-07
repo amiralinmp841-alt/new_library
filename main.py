@@ -2582,10 +2582,10 @@ def get_subtree_db(db, root_node_id):
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
     current_node = context.user_data.get("current_node", "root")
-    
+
     # محدود کردن جستجو فقط به زیرشاخه فعلی
     subtree_db = get_subtree_db(full_db, current_node)
-    
+
     # جستجو در زیرشاخه
     results = smart_search(subtree_db, text, limit=5, min_score=45)
 
@@ -2597,11 +2597,11 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             f"""🔍 نتیجه‌ای در این پوشه یافت نشد.
         
-        ⚠️ توجه!
-        فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
-        برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
-        
-        {help_text}""",
+⚠️ توجه!
+فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
+برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
+
+{help_text}""",
             parse_mode="HTML"
         )
         return CHOOSING
@@ -2611,26 +2611,78 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     for item in results:
         node_id = item["node_id"]
-        # دریافت مسیر کامل از دیتابیس اصلی
-        path_text = get_node_path_text(full_db, node_id)
-        
-        # ساخت دیپ‌لینک
-        deep_link = f"https://t.me/{bot_username}?start={node_id}"
-        
-        # فرمت‌دهی با لینک HTML (قابل کلیک)
-        msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
+
+        # مسیر لینک‌دار؛ هر بخش از مسیر، لینک خودِ همان پوشه را دارد
+        path_html = get_node_path_html(full_db, node_id, bot_username)
+
+        msg += f"📂 {path_html}\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
-    msg += " 🪄 روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید. \n"
+    msg += "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n"
     msg += help_text
 
     await update.message.reply_text(
-        msg, 
-        parse_mode="HTML", 
+        msg,
+        parse_mode="HTML",
         disable_web_page_preview=True
     )
 
     return CHOOSING
+
+
+# اسمارت سرچ با یک لینک روی هر مسیر
+#async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
+#    full_db = load_db()
+#    current_node = context.user_data.get("current_node", "root")
+#    
+#    # محدود کردن جستجو فقط به زیرشاخه فعلی
+#    subtree_db = get_subtree_db(full_db, current_node)
+#    
+#    # جستجو در زیرشاخه
+#    results = smart_search(subtree_db, text, limit=5, min_score=45)
+#
+#    help_text = (
+#        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
+#    )
+#
+#    if not results:
+#        await update.message.reply_text(
+#            f"""🔍 نتیجه‌ای در این پوشه یافت نشد.
+#        
+#        ⚠️ توجه!
+#        فقط مسیرهای موجود در پوشه فعلی جستجو می‌شوند.
+#        برای جستجوی کل کتابخانه، ابتدا به صفحه اصلی بروید.
+#        
+#        {help_text}""",
+#            parse_mode="HTML"
+#        )
+#        return CHOOSING
+#
+#    bot_username = context.bot.username
+#    msg = "🔍 نتایج یافت شده در این پوشه:\n\n"
+#
+#    for item in results:
+#        node_id = item["node_id"]
+#        # دریافت مسیر کامل از دیتابیس اصلی
+#        path_text = get_node_path_text(full_db, node_id)
+#        
+#        # ساخت دیپ‌لینک
+#        deep_link = f"https://t.me/{bot_username}?start={node_id}"
+#        
+#        # فرمت‌دهی با لینک HTML (قابل کلیک)
+#        msg += f"📂 <a href='{deep_link}'>{path_text}</a>\n"
+#        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+#
+#    msg += " 🪄 روی مسیر آبی‌رنگ کلیک کنید تا مستقیم به آنجا بروید. \n"
+#    msg += help_text
+#
+#    await update.message.reply_text(
+#        msg, 
+#        parse_mode="HTML", 
+#        disable_web_page_preview=True
+#    )
+#
+#    return CHOOSING
 
 async def toggle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
