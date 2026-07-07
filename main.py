@@ -634,7 +634,7 @@ def pop_pending_caption(context):
 #============ تعیین استایل پوشه ها ==============#
 
 #------ تغییر تعداد هر دکمه در یک ردیف ----------
-async def set_row_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     userdata = load_userdata()
     is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
@@ -642,15 +642,146 @@ async def set_row_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin:
         return
 
-    command = update.message.text.lower() # مثلا "/3"
+    text = update.message.text.strip()
+    lines = text.split("\n")
+
+    current_node_id = context.user_data.get("current_node", "root")
+    db = load_db()
+
+    if current_node_id not in db:
+        await update.message.reply_text("❌ پوشه فعلی در دیتابیس پیدا نشد.")
+        return
+
+    node = db[current_node_id]
+    children_ids = node.get("children", [])
     
-    # استخراج عدد از دستور
-    try:
-        count = int(command.replace("/", ""))
-        if not (1 <= count <= 6): # محدودیت منطقی بین 1 تا 6
-            raise ValueError
-    except:
-        await update.message.reply_text("❌ لطفاً عدد بین ۱ تا ۶ وارد کنید. مثال: /3")
+    if not children_ids:
+        await update.message.reply_text("❌ این پوشه هیچ دکمه‌ای ندارد که چیدمان آن را تغییر دهید.")
+        return
+
+    # 💡 قابلیت جدید: اگر فقط خط اول فرستاده شده بود (/style)، لایوت سفارشی حذف شده و به حالت عادی برمی‌گردد
+    if len(lines) < 2:
+        push_admin_history(context, db)
+        db[current_node_id].pop("layout", None)
+        
+        bot_username = context.bot.username
+        node_name = node["name"]
+        node_link = get_link(current_node_id, node_name, bot_username)
+        
+        desc = f"📐 چیدمان سفارشی پوشه {node_link} حذف شد و به حالت پیش‌فرض ستونی برگشت."
+        log_caption = format_admin_log(update.effective_user, desc)
+        backup_caption = format_backup_caption(update.effective_user, "حذف چیدمان سفارشی دکمه‌ها")
+        
+        set_pending_caption(context, log_caption)
+        set_pending_backup_caption(context, backup_caption)
+        save_db(db, context=context)
+        
+        await update.message.reply_text(
+            "✅ چیدمان سفارشی حذف شد و به حالت استاندارد بازگشت.",
+            reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
+        )
+        return CHOOSING
+
+    # استخراج تمام شماره‌ها از خطوط فرستاده شده
+    layout_by_indices = []
+    used_indices = set()
+    invalid_found = False
+
+    for line in lines[1:]: # از خط دوم به بعد
+        line = line.strip()
+        if not line:
+            continue
+        row_indices = []
+        for num_str in line.split():
+            try:
+                idx = int(num_str) - 1 # تبدیل به index (شروع از 0)
+                if 0 <= idx < len(children_ids):
+                    row_indices.append(idx)
+                    used_indices.add(idx)
+                else:
+                    invalid_found = True
+            except ValueError:
+                invalid_found = True
+        if row_indices:
+            layout_by_indices.append(row_indices)
+
+    if invalid_found:
+        await update.message.reply_text(
+            f"❌ برخی شماره‌ها نامعتبر بودند. تعداد کل دکمه‌های این پوشه {len(children_ids)} عدد است."
+        )
+        return
+
+    # تبدیل ایندکس‌ها به IDهای واقعی پوشه‌ها
+    new_layout = []
+    for row in layout_by_indices:
+        row_ids = [children_ids[idx] for idx in row]
+        new_layout.append(row_ids)
+
+    # پیدا کردن دکمه‌هایی که ادمین در دستور وارد نکرده تا گم نشوند
+    missing_ids = [c_id for idx, c_id in enumerate(children_ids) if idx not in used_indices]
+    
+    # دکمه‌های فراموش شده را در ردیف‌های پیش‌فرض (بر اساس max_cols) به انتهای لایوت اضافه می‌کنیم
+    if missing_ids:
+        max_cols = node.get("row_count", 2)
+        for i in range(0, len(missing_ids), max_cols):
+            new_layout.append(missing_ids[i:i+max_cols])
+
+    # همچنین ترتیب اصلی children را بر اساس این لایوت جدید مرتب می‌کنیم تا ترتیب فیزیکی دیتابیس هم درست بماند
+    ordered_children = []
+    for row in new_layout:
+        ordered_children.extend(row)
+    
+    # پشتیبانی از undo/redo
+    push_admin_history(context, db)
+
+    # آپدیت دیتابیس
+    db[current_node_id]["layout"] = new_layout
+    db[current_node_id]["children"] = ordered_children
+
+    # لاگ‌گیری
+    bot_username = context.bot.username
+    node_name = node["name"]
+    node_link = get_link(current_node_id, node_name, bot_username)
+    
+    desc = f"📐 چیدمان و ترتیب دکمه‌های پوشه {node_link} به صورت دستی بازنویسی شد."
+    
+    log_caption = format_admin_log(update.effective_user, desc)
+    backup_caption = format_backup_caption(update.effective_user, "تغییر چیدمان سفارشی دکمه‌ها")
+    
+    set_pending_caption(context, log_caption)
+    set_pending_backup_caption(context, backup_caption)
+    
+    save_db(db, context=context)
+
+    await update.message.reply_text(
+        "✅ چیدمان سفارشی دکمه‌ها با موفقیت اعمال شد.",
+        reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
+    )
+    return CHOOSING
+
+
+async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    userdata = load_userdata()
+    is_admin = (user_id in ADMIN_IDS) or (user_id in userdata.get("sub_admins", []))
+
+    if not is_admin:
+        return
+
+    text = update.message.text.strip()
+    lines = text.split("\n")
+    
+    # خط اول باید خود دستور باشد (مثلاً /style)
+    # بقیه خطوط شامل شماره‌ها هستند
+    if len(lines) < 2:
+        await update.message.reply_text(
+            "❌ فرمت دستور اشتباه است.\n"
+            "مثال:\n"
+            "/style\n"
+            "1 3\n"
+            "2 4\n"
+            "5"
+        )
         return
 
     current_node_id = context.user_data.get("current_node", "root")
@@ -660,22 +791,78 @@ async def set_row_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ پوشه فعلی در دیتابیس پیدا نشد.")
         return
 
+    node = db[current_node_id]
+    children_ids = node.get("children", [])
+    
+    if not children_ids:
+        await update.message.reply_text("❌ این پوشه هیچ دکمه‌ای ندارد که چیدمان آن را تغییر دهید.")
+        return
+
+    # استخراج تمام شماره‌ها از خطوط فرستاده شده
+    layout_by_indices = []
+    used_indices = set()
+    invalid_found = False
+
+    for line in lines[1:]: # از خط دوم به بعد
+        line = line.strip()
+        if not line:
+            continue
+        row_indices = []
+        for num_str in line.split():
+            try:
+                idx = int(num_str) - 1 # تبدیل به index (شروع از 0)
+                if 0 <= idx < len(children_ids):
+                    row_indices.append(idx)
+                    used_indices.add(idx)
+                else:
+                    invalid_found = True
+            except ValueError:
+                invalid_found = True
+        if row_indices:
+            layout_by_indices.append(row_indices)
+
+    if invalid_found:
+        await update.message.reply_text(
+            f"❌ برخی شماره‌ها نامعتبر بودند. تعداد کل دکمه‌های این پوشه {len(children_ids)} عدد است."
+        )
+        return
+
+    # تبدیل ایندکس‌ها به IDهای واقعی پوشه‌ها
+    new_layout = []
+    for row in layout_by_indices:
+        row_ids = [children_ids[idx] for idx in row]
+        new_layout.append(row_ids)
+
+    # پیدا کردن دکمه‌هایی که ادمین در دستور وارد نکرده تا گم نشوند
+    missing_ids = [c_id for idx, c_id in enumerate(children_ids) if idx not in used_indices]
+    
+    # دکمه‌های فراموش شده را در ردیف‌های پیش‌فرض (مثلاً ۲ تایی) به انتهای لایوت اضافه می‌کنیم
+    if missing_ids:
+        # برای مثال هر ۲ تا دکمه فراموش شده در یک ردیف
+        for i in range(0, len(missing_ids), 2):
+            new_layout.append(missing_ids[i:i+2])
+
+    # همچنین ترتیب اصلی children را بر اساس این لایوت جدید مرتب می‌کنیم تا ترتیب فیزیکی دیتابیس هم درست بماند
+    ordered_children = []
+    for row in new_layout:
+        ordered_children.extend(row)
+    
+    # پشتیبانی از undo/redo
     push_admin_history(context, db)
-    
-    old_count = db[current_node_id].get("row_count", 2)
-    db[current_node_id]["row_count"] = count
-    
+
+    # آپدیت دیتابیس
+    db[current_node_id]["layout"] = new_layout
+    db[current_node_id]["children"] = ordered_children
+
+    # لاگ‌گیری
     bot_username = context.bot.username
-    node_name = db[current_node_id]["name"]
+    node_name = node["name"]
     node_link = get_link(current_node_id, node_name, bot_username)
     
-    desc = (
-        f"🔢 تعداد ستون‌های پوشه {node_link} "
-        f"از «{old_count}» به «{count}» تغییر کرد."
-    )
+    desc = f"📐 چیدمان و ترتیب دکمه‌های پوشه {node_link} به صورت دستی بازنویسی شد."
     
     log_caption = format_admin_log(update.effective_user, desc)
-    backup_caption = format_backup_caption(update.effective_user, "تغییر تعداد ستون دکمه‌ها")
+    backup_caption = format_backup_caption(update.effective_user, "تغییر چیدمان سفارشی دکمه‌ها")
     
     set_pending_caption(context, log_caption)
     set_pending_backup_caption(context, backup_caption)
@@ -683,10 +870,9 @@ async def set_row_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_db(db, context=context)
 
     await update.message.reply_text(
-        f"✅ تعداد ستون‌ها برای این پوشه به {count} تغییر یافت.",
+        "✅ چیدمان سفارشی دکمه‌ها با موفقیت اعمال شد.",
         reply_markup=get_keyboard(current_node_id, True, user_id=user_id)
     )
-
     return CHOOSING
 
 
@@ -1109,6 +1295,7 @@ async def clear_favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     return CHOOSING
 
+
 # --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS --- --- KEYBOARD BUILDERS -
 
 def get_keyboard(node_id, is_admin, user_id=None):
@@ -1118,33 +1305,64 @@ def get_keyboard(node_id, is_admin, user_id=None):
     if not node:
         return ReplyKeyboardMarkup([["/start"]], resize_keyboard=True)
 
-    # 💡 خواندن تعداد ستون (پیش‌فرض ۲)
-    max_cols = node.get("row_count", 2) 
+    children_ids = node.get("children", [])
+    layout = node.get("layout")  # 💡 خواندن لایوت سفارشی (در صورت وجود)
+    max_cols = node.get("row_count", 2)  # 💡 خواندن تعداد ستون پیش‌فرض (۲)
 
     keyboard = []
 
-    # --- دکمه‌های فرزند (همان کدی که داشتی) ---
-    children_ids = node.get("children", [])
-    row = []
+    # تابع کمکی داخلی برای ساخت دکمه با یا بدون استایل رنگی
+    def make_button(c_id):
+        child_node = db.get(c_id)
+        if not child_node:
+            return None
+        btn_style = child_node.get("style")
+        if btn_style:
+            return KeyboardButton(
+                text=child_node["name"],
+                api_kwargs={"style": btn_style}
+            )
+        return KeyboardButton(text=child_node["name"])
 
-    for child_id in children_ids:
-        child_node = db.get(child_id)
-        if child_node:
-            btn_style = child_node.get("style")
-            if btn_style:
-                button = KeyboardButton(
-                    text=child_node["name"],
-                    api_kwargs={"style": btn_style}
-                )
-            else:
-                button = KeyboardButton(text=child_node["name"])
-            row.append(button)
-            
+    # سناریو ۱: اگر لایوت دستی (سفارشی) وجود دارد
+    if layout and isinstance(layout, list):
+        for row in layout:
+            keyboard_row = []
+            for child_id in row:
+                # اطمینان از اینکه دکمه هنوز در لیست children وجود دارد و حذف نشده است
+                if child_id in children_ids:
+                    btn = make_button(child_id)
+                    if btn:
+                        keyboard_row.append(btn)
+            if keyboard_row:
+                keyboard.append(keyboard_row)
+
+        # 💡 بررسی اطمینان: اگر دکمه‌ای در children هست ولی به هر دلیلی در لایوت نیست (مثلاً دکمه جدید)
+        flattened_layout = [item for sublist in layout for item in sublist]
+        extra_row = []
+        for child_id in children_ids:
+            if child_id not in flattened_layout:
+                btn = make_button(child_id)
+                if btn:
+                    extra_row.append(btn)
+                if len(extra_row) == max_cols:
+                    keyboard.append(extra_row)
+                    extra_row = []
+        if extra_row:
+            keyboard.append(extra_row)
+
+    # سناریو ۲: در غیر این صورت، چینش عادی بر اساس تعداد ستون‌ها (row_count)
+    else:
+        row = []
+        for child_id in children_ids:
+            btn = make_button(child_id)
+            if btn:
+                row.append(btn)
             if len(row) == max_cols:
                 keyboard.append(row)
                 row = []
-    if row:
-        keyboard.append(row)
+        if row:
+            keyboard.append(row)
 
     # ========= favorite folder ===============
     if user_id:
@@ -2009,8 +2227,8 @@ def get_item_log_details(item, index: int, bot_username: str = None) -> str:
     if msg_type == "text":
         text_content = item.get("text", "")
         text_escaped = escape(text_content)
-        #preview = text_escaped[:200] + "..." if len(text_escaped) > 200 else text_escaped
-        preview = text_escaped[:4096] + "..." if len(text_escaped) > 4096 else text_escaped
+        preview = text_escaped[:200] + "..." if len(text_escaped) > 200 else text_escaped
+        #preview = text_escaped[:4096] + "..." if len(text_escaped) > 4096 else text_escaped
         return f"📝 <b>پیام متنی {index}:</b>\n<blockquote expandable>{preview}</blockquote>"
     
     file_id = item.get("file_id", "")
@@ -5825,6 +6043,9 @@ def build_application():
     application.add_handler(CommandHandler("4", set_row_count), group=0)
     application.add_handler(CommandHandler("5", set_row_count), group=0)
     application.add_handler(CommandHandler("6", set_row_count), group=0)
+    # در کنار هندلرهای سراسری دیگر در build_application
+    application.add_handler(CommandHandler("style", set_custom_layout), group=0)
+
     
     application.add_handler(
         MessageReactionHandler(handle_reaction, message_reaction_types=MessageReactionHandler.MESSAGE_REACTION), 
@@ -5852,6 +6073,7 @@ def build_application():
                 CommandHandler("file_id", file_id_command), # 👈 اضافه شدن کامند جدید به منو
                 CommandHandler("change", handle_reply_change),
                 CommandHandler("del", handle_reply_delete),
+                CommandHandler("style", set_custom_layout), 
                 #CommandHandler("clear", clear_favorites_cmd),
 
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
