@@ -2770,7 +2770,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     subtree_db = get_subtree_db(full_db, search_root)
 
-    # دریافت تا ۱۵ نتیجه برای تفکیک ۵ تا اول و ۱۰ تا دوم
+    # دریافت تا ۱۵ نتیجه (فقط پوشه‌ها)
     results = smart_search(subtree_db, text, limit=15, min_score=45)
 
     help_text = (
@@ -2805,7 +2805,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = (
         f"🔎 <b>{mode_title}</b>\n"
         f"{mode_desc}\n\n"
-        f"🔍 نتایج اصلی یافت شده:\n\n"
+        f"🔍 پوشه‌های یافت شده با بیشترین تطابق:\n\n"
     )
 
     # ۵ نتیجه اول
@@ -2813,15 +2813,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     for item in top_results:
         node_id = item["node_id"]
         path_html = get_node_path_html(full_db, node_id, bot_username)
-
-        if item.get("result_type") == "content":
-            file_title = html.escape(item.get("title", "فایل بدون نام"))
-            content_index = item.get("content_index")
-            file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-            msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
-        else:
-            msg += f"📂 {path_html}\n"
-
+        msg += f"📂 {path_html}\n"
         msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
 
     # ۱۰ نتیجه بعدی (رتبه‌های ۶ تا ۱۵) در قالب بلاک‌کوت جمع‌شونده (expandable)
@@ -2832,15 +2824,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         for item in extra_results:
             node_id = item["node_id"]
             path_html = get_node_path_html(full_db, node_id, bot_username)
-
-            if item.get("result_type") == "content":
-                file_title = html.escape(item.get("title", "فایل بدون نام"))
-                content_index = item.get("content_index")
-                file_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
-                msg += f"📄 {path_html} / <a href='{file_link}'>{file_title}</a>\n"
-            else:
-                msg += f"📂 {path_html}\n"
-
+            msg += f"📂 {path_html}\n"
             msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
         msg += "</blockquote>\n"
 
