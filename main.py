@@ -508,7 +508,7 @@ async def upload_userdata_if_user_inactive(context: ContextTypes.DEFAULT_TYPE):
     last_activity_ts = int(user_record.get("last_activity_ts", 0))
     now_ts = int(time.time())
 
-    if now_ts - last_activity_ts >= 60:
+    if now_ts - last_activity_ts >= 10:
         print(f"📤 User {user_id} inactive for 60 seconds. Uploading userdata...")
         save_userdata(userdata, upload=True)
 
@@ -527,7 +527,6 @@ def schedule_inactive_upload(context: ContextTypes.DEFAULT_TYPE, user_id: int):
         data={"user_id": user_id},
         name=job_name
     )
-
 
 def get_saved_current_node(user_id, default=None):
     userdata = load_userdata()
@@ -5886,7 +5885,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING
 
 def build_application():
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(notify_admins_on_restart)
+        .build()
+    )
 
     application.add_handler(
         MessageHandler(
