@@ -2749,16 +2749,13 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     userdata = load_userdata()
     users = userdata.setdefault("users", {})
 
-    # اگر کاربر در userdata نبود، ثبت اولیه شود
     if user_id not in users:
         track_user_activity(update, count_message=False)
         userdata = load_userdata()
         users = userdata.setdefault("users", {})
 
-    # دیفالت = root
     search_mode = users.get(user_id, {}).get("search_mode", "root")
 
-    # تعیین محدوده جستجو
     if search_mode == "current_node":
         search_root = current_node
         mode_title = "Current Folder Search"
@@ -2768,10 +2765,8 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         mode_title = "General Search"
         mode_desc = "جستجو در کل کتابخانه انجام شد."
 
-    subtree_db = get_subtree_db(full_db, search_root)
-
-    # جستجو
-    results = smart_search(subtree_db, text, limit=5, min_score=45)
+    # اجرای جستجوی هوشمند در پوشه هدف
+    results = smart_search(full_db, text, root_node_id=search_root, limit=7, min_score=40)
 
     help_text = (
         "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
@@ -2808,14 +2803,27 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     for item in results:
         node_id = item["node_id"]
+        result_type = item["result_type"]
+        title = item["title"]
+        path = item["path"]
+        score = int(item["score"])
 
-        path_html = get_node_path_html(full_db, node_id, bot_username)
-
-        msg += f"📂 {path_html}\n"
-        msg += f"درصد تطابق: {int(item['score'])}٪\n\n"
+        if result_type == "node":
+            # دیپ لینک هدایت به پوشه
+            deep_link = f"https://t.me/{bot_username}?start={node_id}"
+            msg += f"📂 <b><a href='{deep_link}'>{title}</a></b>\n"
+            msg += f"📍 مسیر: <i>{path}</i>\n"
+        else:
+            # دیپ لینک اختصاصی فایل (با پیشوند file_)
+            content_index = item["content_index"]
+            deep_link = f"https://t.me/{bot_username}?start=file_{node_id}_{content_index}"
+            msg += f"📄 <b><a href='{deep_link}'>{title}</a></b> [فایل]\n"
+            msg += f"📍 مسیر: <i>{path}</i>\n"
+            
+        msg += f"🎯 درصد تطابق: {score}٪\n\n"
 
     msg += (
-        "🪄 روی هر بخش از مسیر آبی‌رنگ کلیک کنید تا مستقیم به همان پوشه بروید.\n\n"
+        "🪄 روی نتایج آبی‌رنگ کلیک کنید تا مستقیم به فایل یا پوشه مربوطه منتقل شوید.\n\n"
         f"{help_text}"
     )
 
@@ -2826,6 +2834,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     return CHOOSING
+
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -5534,6 +5543,7 @@ def extract_message_content(msg):
         return {
             "type": "photo",
             "file_id": msg.photo[-1].file_id,
+            "file_name": "Image File", # عکس‌ها معمولاً فاقد نام فایل متنی هستند
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5543,6 +5553,7 @@ def extract_message_content(msg):
         return {
             "type": "video",
             "file_id": msg.video.file_id,
+            "file_name": msg.video.file_name if hasattr(msg.video, 'file_name') else "Video File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5552,6 +5563,7 @@ def extract_message_content(msg):
         return {
             "type": "document",
             "file_id": msg.document.file_id,
+            "file_name": msg.document.file_name if hasattr(msg.document, 'file_name') else "Document File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5561,6 +5573,7 @@ def extract_message_content(msg):
         return {
             "type": "audio",
             "file_id": msg.audio.file_id,
+            "file_name": msg.audio.file_name if hasattr(msg.audio, 'file_name') else "Audio File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5570,6 +5583,7 @@ def extract_message_content(msg):
         return {
             "type": "voice",
             "file_id": msg.voice.file_id,
+            "file_name": "Voice File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5579,6 +5593,7 @@ def extract_message_content(msg):
         return {
             "type": "animation",
             "file_id": msg.animation.file_id,
+            "file_name": msg.animation.file_name if hasattr(msg.animation, 'file_name') else "Animation File",
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5588,6 +5603,7 @@ def extract_message_content(msg):
         return {
             "type": "video_note",
             "file_id": msg.video_note.file_id,
+            "file_name": "Video Note",
             "media_group_id": media_group_id,
         }
 
@@ -5595,6 +5611,7 @@ def extract_message_content(msg):
         return {
             "type": "sticker",
             "file_id": msg.sticker.file_id,
+            "file_name": "Sticker",
             "media_group_id": media_group_id,
         }
 
