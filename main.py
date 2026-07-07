@@ -2738,43 +2738,103 @@ def get_subtree_db(db, root_node_id):
 
 async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, is_admin: bool):
     full_db = load_db()
-    current_node = context.user_data.get("current_node", "root")
-    
-    # تعیین محدوده جستجو بر اساس تنظیمات کاربر
-    userdata = load_userdata()
-    user_id = str(update.effective_user.id)
-    search_mode = userdata.get("users", {}).get(user_id, {}).get("search_mode", "root")
-    search_root = current_node if search_mode == "current_node" else "root"
 
-    # فراخوانی سرچ هوشمند جدید
-    results = smart_search(full_db, text, root_node_id=search_root)
+    user = update.effective_user
+    if not user:
+        return CHOOSING
+
+    user_id = str(user.id)
+    current_node = context.user_data.get("current_node", "root")
+
+    userdata = load_userdata()
+    users = userdata.setdefault("users", {})
+
+    # ثبت اولیه کاربر در صورت عدم وجود
+    if user_id not in users:
+        track_user_activity(update, count_message=False)
+        userdata = load_userdata()
+        users = userdata.setdefault("users", {})
+
+    search_mode = users.get(user_id, {}).get("search_mode", "root")
+
+    # تعیین محدوده جستجو
+    if search_mode == "current_node":
+        search_root = current_node
+        mode_title = "Current Folder Search"
+        mode_desc = "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شد."
+    else:
+        search_root = "root"
+        mode_title = "General Search"
+        mode_desc = "جستجو در کل کتابخانه انجام شد."
+
+    # فراخوانی تابع سرچ هوشمند جدید با آرگومان روتِ مشخص
+    results = smart_search(full_db, text, root_node_id=search_root, limit=5, min_score=45)
+
+    help_text = (
+        "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
+        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
+    )
 
     if not results:
-        await update.message.reply_text("🔍 نتیجه‌ای یافت نشد.")
+        if search_mode == "current_node":
+            not_found_text = (
+                "🔍 نتیجه‌ای در <b>Current Folder Search</b> یافت نشد.\n\n"
+                "⚠️ توجه!\n"
+                "جستجو فقط در پوشه فعلی و زیرشاخه‌های آن انجام شده است.\n"
+                "اگر می‌خواهید در کل کتابخانه جستجو شود، /search_mode را بزنید."
+            )
+        else:
+            not_found_text = (
+                "🔍 نتیجه‌ای در <b>General Search</b> یافت نشد.\n\n"
+                "جستجو در کل کتابخانه انجام شد اما نتیجه‌ای پیدا نشد."
+            )
+
+        await update.message.reply_text(
+            f"{not_found_text}\n\n{help_text}",
+            parse_mode="HTML"
+        )
         return CHOOSING
 
     bot_username = context.bot.username
-    msg = f"🔎 <b>نتایج جستجو:</b>\n\n"
+
+    msg = (
+        f"🔎 <b>{mode_title}</b>\n"
+        f"{mode_desc}\n\n"
+        f"🔍 نتایج یافت شده:\n\n"
+    )
 
     for item in results:
-        score = int(item['score'])
-        path_text = item['path']
-        
+        score = int(item["score"])
+        path_text = item["path"]
+        title_escaped = html.escape(item["title"])
+
         if item["type"] == "node":
-            # لینک به پوشه
-            link = f"https://t.me/{bot_username}?start={item['id']}"
-            msg += f"📂 <b><a href='{link}'>{item['title']}</a></b>\n"
+            # پوشه ها
+            node_id = item["node_id"]
+            link = f"https://t.me/{bot_username}?start={node_id}"
+            msg += f"📂 <b><a href='{link}'>{title_escaped}</a></b>\n"
         else:
-            # دیپ‌لینک به فایل مستقیم
-            link = f"https://t.me/{bot_username}?start=file_{item['id']}_{item['content_index']}"
-            msg += f"📄 <b><a href='{link}'>{item['title']}</a></b> (فایل)\n"
-        
+            # فایل‌ها (با ساختار دیپ‌لینک فایل تفکیک‌شده)
+            node_id = item["node_id"]
+            idx = item["content_index"]
+            link = f"https://t.me/{bot_username}?start=file_{node_id}_{idx}"
+            msg += f"📄 <b><a href='{link}'>{title_escaped}</a></b> (فایل)\n"
+
         msg += f"📍 مسیر: <code>{path_text}</code>\n"
-        msg += f"🎯 تطابق: {score}٪\n\n"
+        msg += f"🎯 درصد تطابق: {score}٪\n\n"
 
-    await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
+    msg += (
+        "🪄 روی نام پوشه یا فایل کلیک کنید تا مستقیماً به آن هدایت شوید.\n\n"
+        f"{help_text}"
+    )
+
+    await update.message.reply_text(
+        msg,
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
+
     return CHOOSING
-
 
 async def toggle_search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -5489,27 +5549,36 @@ def extract_message_content(msg):
         }
 
     if msg.video:
+        # استخراج اسم ویدیو در صورت وجود
+        file_name = getattr(msg.video, "file_name", None)
         return {
             "type": "video",
             "file_id": msg.video.file_id,
+            "file_name": file_name, # ذخیره اسم فایل
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.document:
+        # سند حتماً file_name دارد
+        file_name = getattr(msg.document, "file_name", None)
         return {
             "type": "document",
             "file_id": msg.document.file_id,
+            "file_name": file_name, # ذخیره اسم فایل
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
         }
 
     if msg.audio:
+        # فایل صوتی ممکن است title داشته باشد یا file_name
+        file_name = getattr(msg.audio, "file_name", None) or getattr(msg.audio, "title", None)
         return {
             "type": "audio",
             "file_id": msg.audio.file_id,
+            "file_name": file_name, # ذخیره اسم فایل
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
@@ -5525,9 +5594,11 @@ def extract_message_content(msg):
         }
 
     if msg.animation:
+        file_name = getattr(msg.animation, "file_name", None)
         return {
             "type": "animation",
             "file_id": msg.animation.file_id,
+            "file_name": file_name, # ذخیره اسم فایل
             "caption": raw_caption,
             "entities": msg_caption_entities,
             "media_group_id": media_group_id,
