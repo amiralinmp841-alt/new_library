@@ -1,13 +1,6 @@
 from rapidfuzz import fuzz
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 import re
-import numpy as np
 
-# مدل فقط یک بار هنگام اجرای ربات لود می‌شود
-embedding_model = SentenceTransformer(
-    "sentence-transformers/paraphrase-multilingual-MiniLM-L6-v2"
-)
 
 def normalize_text(text: str) -> str:
     if not text:
@@ -15,42 +8,25 @@ def normalize_text(text: str) -> str:
 
     text = str(text)
 
-    # ۱. نقشه جایگزینی کاراکترهای خاص
     replacements = {
-        "ي": "ی", "ك": "ک", "ۀ": "ه", "ة": "ه", "ؤ": "و",
-        "إ": "ا", "أ": "ا", "آ": "ا", "\u200c": " ",
+        "ي": "ی",
+        "ك": "ک",
+        "ۀ": "ه",
+        "ة": "ه",
+        "ؤ": "و",
+        "إ": "ا",
+        "أ": "ا",
+        "آ": "ا",
+        "\u200c": " ",
     }
 
-    # ۲. نقشه تبدیل اعداد فارسی و کلمات ترتیبی به عدد واحد
-    # این لیست را می‌توانید بر اساس نیاز گسترش دهید
-    ordinal_replacements = {
-        "اول": "1", "یک": "1",
-        "دوم": "2", "دو": "2",
-        "سوم": "3", "سه": "3",
-        "چهارم": "4", "چهار": "4",
-        "پنجم": "5", "پنج": "5",
-        "ششم": "6", "شش": "6",
-        "هفتم": "7", "هفت": "7",
-        "هشتم": "8", "هشت": "8",
-        "نهم": "9", "نه": "9",
-        "دهم": "10", "ده": "10",
-        "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4",
-        "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9"
-    }
-
-    # جایگزینی حروف
     for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    # جایگزینی کلمات ترتیبی و اعداد (با استفاده از کلمات کامل)
-    # توجه: باید کلمات طولانی‌تر را اول چک کنیم تا تداخل پیش نیاید
-    for old, new in sorted(ordinal_replacements.items(), key=lambda x: len(x[0]), reverse=True):
         text = text.replace(old, new)
 
     text = text.lower()
 
-    # حذف علائم اضافی (به جز اعداد و حروف فارسی)
-    text = re.sub(r"[^\w\sآ-ی0-9]", " ", text)
+    # حذف علائم اضافی
+    text = re.sub(r"[^\w\sآ-ی]", " ", text)
 
     # فاصله‌های اضافه
     text = re.sub(r"\s+", " ", text).strip()
@@ -108,14 +84,14 @@ def flatten_db_for_search(db):
             f"{node_name} {path_text} {contents_text}"
         )
 
-        if node_id not in start_nodes:
+        if node_id != "root":
             results.append({
                 "node_id": node_id,
                 "title": node_name,
                 "path": " ⬅️ ".join(new_path_parts),
                 "search_text": search_text
             })
-            
+
         for child_id in node.get("children", []):
             walk(child_id, new_path_parts)
 
@@ -125,135 +101,27 @@ def flatten_db_for_search(db):
 
     return results
 
-def embedding_search(db, query, limit=5, threshold=0.45):
-
-    query_norm = normalize_text(query)
-
-    if not query_norm:
-        return []
-
-
-    items = flatten_db_for_search(db)
-
-    if not items:
-        return []
-
-
-    texts = [
-        item["search_text"]
-        for item in items
-    ]
-
-
-    # تبدیل دیتابیس به بردار
-    vectors = embedding_model.encode(
-        texts,
-        convert_to_numpy=True
-    )
-
-
-    # تبدیل سرچ کاربر
-    query_vector = embedding_model.encode(
-        [query_norm],
-        convert_to_numpy=True
-    )
-
-
-    scores = cosine_similarity(
-        query_vector,
-        vectors
-    )[0]
-
-
-    results = []
-
-
-    for item, score in zip(items, scores):
-
-        if score >= threshold:
-
-            results.append({
-                "node_id": item["node_id"],
-                "title": item["title"],
-                "path": item["path"],
-                "score": score * 100
-            })
-
-
-    results.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-
-    return results[:limit]
-
-
 def smart_search(db, query, limit=5, min_score=45):
-
-    # =========================
-    # مرحله اول: Embedding
-    # =========================
-
-    semantic_results = embedding_search(
-        db,
-        query,
-        limit=limit,
-        threshold=0.45
-    )
-
-
-    # اگر جواب معنایی پیدا شد
-    if semantic_results:
-        return semantic_results
-
-
-
-    # =========================
-    # مرحله دوم: RapidFuzz
-    # =========================
-
     query_norm = normalize_text(query)
 
     if not query_norm:
         return []
 
-
     items = flatten_db_for_search(db)
 
     results = []
-
 
     for item in items:
-
         text = item["search_text"]
 
+        # چند مدل امتیازدهی برای بهتر شدن سرچ فارسی
+        score_1 = fuzz.token_set_ratio(query_norm, text)
+        score_2 = fuzz.partial_ratio(query_norm, text)
+        score_3 = fuzz.WRatio(query_norm, text)
 
-        score_1 = fuzz.token_set_ratio(
-            query_norm,
-            text
-        )
-
-        score_2 = fuzz.partial_ratio(
-            query_norm,
-            text
-        )
-
-        score_3 = fuzz.WRatio(
-            query_norm,
-            text
-        )
-
-
-        score = max(
-            score_1,
-            score_2,
-            score_3
-        )
-
+        score = max(score_1, score_2, score_3)
 
         if score >= min_score:
-
             results.append({
                 "node_id": item["node_id"],
                 "title": item["title"],
@@ -261,11 +129,6 @@ def smart_search(db, query, limit=5, min_score=45):
                 "score": score
             })
 
-
-    results.sort(
-        key=lambda x:x["score"],
-        reverse=True
-    )
-
+    results.sort(key=lambda x: x["score"], reverse=True)
 
     return results[:limit]
