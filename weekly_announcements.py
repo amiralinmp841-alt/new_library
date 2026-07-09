@@ -311,6 +311,10 @@ def build_week_root_keyboard(data):
         [
             InlineKeyboardButton("➕ افزودن گروه", callback_data="week_add_group_root"),
             InlineKeyboardButton("➖ حذف گروه", callback_data="week_delete_group_menu_root"),
+        ],
+        [
+            InlineKeyboardButton("📥 دریافت بکاپ", callback_data="week_backup_get"),
+            InlineKeyboardButton("📤 وارد کردن بکاپ", callback_data="week_backup_upload_prompt"),
         ]
     ]
 
@@ -1966,3 +1970,54 @@ def collect_group_and_children_ids(data, group_id):
     for child_id in group.get("children", []):
         result.extend(collect_group_and_children_ids(data, child_id))
     return result
+
+# ========== بکاپ دستی ===============
+# وضعیت برای ConversationHandler جدید
+WEEK_WAITING_BACKUP_FILE = 99
+
+async def handle_week_backup_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "week_backup_get":
+        # ارسال فایل به کاربر
+        await query.message.reply_document(document=open(WEEK_FILE, "rb"), caption="این هم فایل بکاپ فعلی")
+        return WEEK_ROOT # یا هر استیت اصلی که داری
+
+    elif query.data == "week_backup_upload_prompt":
+        await query.edit_message_text("لطفاً فایل `week.json` جدید را همین‌جا بفرستید.")
+        # باید یک استیت برای انتظار فایل ست کنی
+        context.user_data["week_state"] = WEEK_WAITING_BACKUP_FILE
+        return WEEK_WAITING_BACKUP_FILE
+
+async def receive_week_backup_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.document:
+        await update.message.reply_text("❌ لطفاً فایل را به صورت Document بفرستید (نه عکس یا متن).")
+        return WEEK_WAITING_BACKUP_FILE
+
+    # دانلود فایل جدید
+    new_file = await update.message.document.get_file()
+    temp_path = "/tmp/new_week.json"
+    await new_file.download_to_drive(temp_path)
+
+    # تست سلامت فایل JSON
+    try:
+        with open(temp_path, "r", encoding="utf-8") as f:
+            new_data = json.load(f)
+        
+        # اگر فرمت درست بود، جایگزین کن
+        with open(WEEK_FILE, "w", encoding="utf-8") as f:
+            json.dump(new_data, f, ensure_ascii=False, indent=2)
+        
+        # بکاپ جدید را هم به تلگرام بفرست که sync شود
+        upload_weekly_to_telegram() 
+        
+        await update.message.reply_text("✅ فایل با موفقیت جایگزین شد و در گروه بکاپ هم آپلود شد.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطا در خواندن فایل. مطمئن شوید JSON سالم است.\n{e}")
+    
+    # حذف فایل موقت
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+        
+    return WEEK_ROOT # بازگشت به منوی اصلی
