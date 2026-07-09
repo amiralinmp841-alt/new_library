@@ -9,7 +9,7 @@ from week_storage import load_week_data, save_week_data
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-#WEEK_FILE = "/tmp/week.json"
+WEEK_FILE = "/tmp/week.json"
 
 WEEK_ROOT = "week_root"
 WEEK_WAITING_GROUP_NAME = "week_waiting_group_name"
@@ -1981,7 +1981,7 @@ async def handle_week_backup_actions(update: Update, context: ContextTypes.DEFAU
 
     if query.data == "week_backup_get":
         if not os.path.exists(WEEK_FILE):
-            await query.message.reply_text("❌ فایل بکاپ week.json پیدا نشد.")
+            await query.message.reply_text("❌ فایل بکاپ `week.json` پیدا نشد.")
             return WEEK_ROOT
 
         try:
@@ -1992,17 +1992,31 @@ async def handle_week_backup_actions(update: Update, context: ContextTypes.DEFAU
                     caption="📥 این هم فایل بکاپ فعلی الارم‌ها."
                 )
         except Exception as e:
-            await query.message.reply_text(f"❌ خطا در ارسال بکاپ:\n{e}")
+            await query.message.reply_text(f"❌ خطا در ارسال بکاپ:\n`{e}`")
 
         return WEEK_ROOT
 
     if query.data == "week_backup_upload_prompt":
+        cancel_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ لغو", callback_data="week_backup_cancel")]
+        ])
+
         await query.edit_message_text(
-            "📤 لطفاً فایل `week.json` جدید را به صورت Document بفرستید."
+            "📤 لطفاً فایل `week.json` جدید را به صورت Document بفرستید.",
+            reply_markup=cancel_keyboard,
+            parse_mode="Markdown"
         )
         return WEEK_WAITING_BACKUP_FILE
 
+    if query.data == "week_backup_cancel":
+        await query.edit_message_text(
+            "❌ عملیات وارد کردن بکاپ لغو شد.",
+            reply_markup=build_week_root_keyboard(load_week_data())
+        )
+        return WEEK_ROOT
+
     return WEEK_ROOT
+
 
 async def receive_week_backup_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.document:
@@ -2026,7 +2040,10 @@ async def receive_week_backup_file(update: Update, context: ContextTypes.DEFAULT
         # بکاپ جدید را هم به تلگرام بفرست که sync شود
         upload_weekly_to_telegram() 
         
-        await update.message.reply_text("✅ فایل با موفقیت جایگزین شد و در گروه بکاپ هم آپلود شد.")
+        await update.message.reply_text(
+            "✅ فایل با موفقیت جایگزین شد و در گروه بکاپ هم آپلود شد.",
+            reply_markup=build_week_root_keyboard(load_week_data())
+        )
     except Exception as e:
         await update.message.reply_text(f"❌ خطا در خواندن فایل. مطمئن شوید JSON سالم است.\n{e}")
     
