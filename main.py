@@ -6224,6 +6224,11 @@ def build_application():
 
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
+                CallbackQueryHandler(
+                    handle_week_backup_actions,
+                    pattern=r"^week_backup_(get|upload_prompt)$"
+                )
+                
 
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation),
             ],
