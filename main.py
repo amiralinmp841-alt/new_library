@@ -6309,7 +6309,7 @@ def build_application():
             WEEK_ROOT: [
                 CallbackQueryHandler(
                     handle_week_backup_actions,
-                    pattern=r"^week_backup_(get|upload_prompt)$"
+                    pattern=r"^week_backup_(get|upload_prompt|cancel)$"
                 ),
                 CallbackQueryHandler(
                     week_callback_handler,
@@ -6344,7 +6344,10 @@ def build_application():
             ],
 
             WEEK_WAITING_BACKUP_FILE: [
-                CommandHandler("cancel", week_cancel),
+                CallbackQueryHandler(
+                    handle_week_backup_actions,
+                    pattern=r"^week_backup_cancel$"
+                ),
                 MessageHandler(filters.Document.ALL, receive_week_backup_file),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_backup_file),
             ],
