@@ -4,11 +4,12 @@ import re
 import uuid
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
+from week_storage import load_week_data, save_week_data
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-WEEK_FILE = "/tmp/week.json"
+#WEEK_FILE = "/tmp/week.json"
 
 WEEK_ROOT = "week_root"
 WEEK_WAITING_GROUP_NAME = "week_waiting_group_name"
@@ -43,33 +44,6 @@ ALL_DAYS = [
     "پنج شنبه",
     "جمعه",
 ]
-
-
-def load_week_data():
-    if not os.path.exists(WEEK_FILE):
-        initial_data = {"groups": {}}
-        save_week_data(initial_data)
-        return initial_data
-
-    try:
-        with open(WEEK_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {"groups": {}}
-        save_week_data(data)
-        return data
-
-    if "groups" not in data or not isinstance(data["groups"], dict):
-        data["groups"] = {}
-        save_week_data(data)
-
-    return data
-
-
-def save_week_data(data):
-    with open(WEEK_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 def normalize_schedule_text(text: str) -> str:
     text = (text or "").strip()
@@ -1589,11 +1563,21 @@ async def receive_week_alarm_time(update: Update, context: ContextTypes.DEFAULT_
             f"{days_before} روز قبل، ساعت {time_value}"
         )
 
+    immediate_sent = await dispatch_immediate_alarm_after_user_setting(
+        context.bot,
+        data,
+        user_id,
+        target,
+    )
+
     save_week_data(data)
 
     context.user_data["week_state"] = WEEK_USER_ROOT
     context.user_data.pop("week_alarm_target", None)
     context.user_data.pop("week_alarm_days_before", None)
+
+    if immediate_sent:
+        message += "\n\n🔔 برای بعضی کلاس‌های نزدیک، یادآوری همین الان ارسال شد."
 
     await update.message.reply_text(message)
     await update.message.reply_text(
@@ -1601,6 +1585,51 @@ async def receive_week_alarm_time(update: Update, context: ContextTypes.DEFAULT_
         reply_markup=build_alarm_root_keyboard(),
     )
     return WEEK_USER_ROOT
+
+
+async def dispatch_immediate_alarm_after_user_setting(bot, data, user_id, target):
+    now = get_now()
+    user_data = ensure_user_week_data(data, user_id)
+    ensure_user_alarm_defaults(user_data)
+
+    if not user_data.get("alarm_enabled", True):
+        return False
+
+    if target["type"] == "all":
+        group_ids = clean_user_courses(data, user_data)
+    else:
+        group_id = target.get("group_id")
+        group_ids = [group_id] if group_id else []
+
+    changed = False
+
+    for group_id in group_ids:
+        group = data.get("groups", {}).get(group_id)
+        if not group:
+            continue
+
+        alarm_config = get_user_alarm_config_for_group(user_data, group_id)
+
+        for schedule in group.get("schedules", []):
+            occurrences = get_schedule_occurrences(schedule, horizon_weeks=8, now=now)
+
+            for occurrence in occurrences:
+                class_dt = occurrence["class_datetime"]
+                alarm_dt = compute_alarm_datetime(class_dt, alarm_config)
+
+                if alarm_dt <= now < class_dt:
+                    sent = await send_alarm_for_occurrence(
+                        bot,
+                        data,
+                        user_id,
+                        group_id,
+                        schedule,
+                        occurrence,
+                    )
+                    if sent:
+                        changed = True
+
+    return changed
 
 
 async def toggle_week_alarm(update: Update, context: ContextTypes.DEFAULT_TYPE):
