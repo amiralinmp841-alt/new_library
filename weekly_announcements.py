@@ -957,3 +957,373 @@ async def week_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("week_target_group", None)
     context.user_data.pop("week_parent_for_new_group", None)
     return ConversationHandler.END
+
+
+
+WEEK_USER_ROOT = "week_user_root"
+
+
+def ensure_week_users_shape(data):
+    data.setdefault("users", {})
+    return data
+
+
+def get_week_user_id(update_or_query):
+    user = update_or_query.effective_user
+    return str(user.id)
+
+
+def ensure_user_week_data(data, user_id):
+    ensure_week_users_shape(data)
+    data["users"].setdefault(user_id, {"courses": []})
+    data["users"][user_id].setdefault("courses", [])
+    return data["users"][user_id]
+
+
+def group_has_children(data, group_id):
+    group = data.get("groups", {}).get(group_id, {})
+    return bool(group.get("children", []))
+
+
+def get_group_title_path(data, group_id):
+    groups = data.get("groups", {})
+    titles = []
+    current_id = group_id
+    visited = set()
+
+    while current_id and current_id in groups and current_id not in visited:
+        visited.add(current_id)
+        group = groups[current_id]
+        titles.append(group.get("title", "بدون نام"))
+        current_id = group.get("parent_id")
+
+    return " ".join(reversed(titles))
+
+
+def clean_user_courses(data, user_data):
+    groups = data.get("groups", {})
+    old_courses = user_data.get("courses", [])
+    user_data["courses"] = [group_id for group_id in old_courses if group_id in groups]
+    return user_data["courses"]
+
+
+def build_user_week_root_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("📚 درس‌های من", callback_data="uweek_my_courses")],
+        [InlineKeyboardButton("📅 برنامه کل هفتگی من", callback_data="uweek_full_schedule")],
+        [InlineKeyboardButton("❌ بستن", callback_data="uweek_close")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def format_my_courses_text(data, user_data):
+    courses = clean_user_courses(data, user_data)
+
+    if not courses:
+        return "هنوز هیچ درسی اضافه نکردی."
+
+    lines = ["📚 درس‌های من:"]
+    for index, group_id in enumerate(courses, start=1):
+        lines.append(f"{index}. {get_group_title_path(data, group_id)}")
+
+    return "\n".join(lines)
+
+
+def build_my_courses_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ افزودن درس", callback_data="uweek_add_course_menu"),
+            InlineKeyboardButton("➖ حذف درس", callback_data="uweek_delete_course_menu"),
+        ],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="uweek_back_root")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_user_group_browser_keyboard(data, parent_id=None):
+    keyboard = []
+
+    if parent_id is None:
+        items = get_root_groups(data)
+        back_callback = "uweek_my_courses"
+    else:
+        items = get_group_children(data, parent_id)
+        parent_group = data.get("groups", {}).get(parent_id, {})
+        grand_parent_id = parent_group.get("parent_id")
+        back_callback = f"uweek_browse:{grand_parent_id}" if grand_parent_id else "uweek_add_course_menu"
+
+    for group_id, group_data in items:
+        title = group_data.get("title", "بدون نام")
+
+        if group_has_children(data, group_id):
+            button_text = f"🔵 {title}"
+            callback_data = f"uweek_browse:{group_id}"
+        else:
+            button_text = f"🟢 {title}"
+            callback_data = f"uweek_add_course:{group_id}"
+
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data=back_callback)])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_delete_my_course_keyboard(data, user_data):
+    courses = clean_user_courses(data, user_data)
+    keyboard = []
+
+    for group_id in courses:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🗑 {get_group_title_path(data, group_id)}",
+                callback_data=f"uweek_delete_course:{group_id}"
+            )
+        ])
+
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="uweek_my_courses")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_day_sort_index(item):
+    days = item.get("days", [])
+    if not days:
+        return 99
+
+    first_day = days[0]
+    try:
+        return ALL_DAYS.index(first_day)
+    except ValueError:
+        return 99
+
+
+def format_user_full_schedule(data, user_data):
+    courses = clean_user_courses(data, user_data)
+
+    if not courses:
+        return "هنوز هیچ درسی اضافه نکردی.\n\nاز بخش «درس‌های من» اول درس‌هایت را اضافه کن."
+
+    schedule_rows = []
+
+    for group_id in courses:
+        group = data.get("groups", {}).get(group_id)
+        if not group:
+            continue
+
+        course_title = get_group_title_path(data, group_id)
+
+        for schedule in group.get("schedules", []):
+            schedule_rows.append({
+                "course_title": course_title,
+                "schedule": schedule,
+            })
+
+    if not schedule_rows:
+        return "برای درس‌های انتخابی تو هنوز هیچ برنامه‌ای ثبت نشده."
+
+    schedule_rows.sort(
+        key=lambda row: (
+            get_day_sort_index(row["schedule"]),
+            int(row["schedule"].get("week_offset", 0)),
+            row["schedule"].get("start_time", "99:99"),
+            row["course_title"],
+        )
+    )
+
+    lines = ["📅 برنامه کل هفتگی من:"]
+
+    current_day = None
+    for row in schedule_rows:
+        schedule = row["schedule"]
+        days_text = " و ".join(schedule.get("days", [])) or "بدون روز"
+
+        if days_text != current_day:
+            current_day = days_text
+            lines.append(f"\n🔹 {days_text}")
+
+        week_label = schedule.get("week_label") or canonical_week_label(
+            schedule.get("mode", "single"),
+            int(schedule.get("week_offset", 0))
+        )
+
+        start_time = schedule.get("start_time", "--:--")
+        end_time = schedule.get("end_time", "--:--")
+
+        lines.append(
+            f"• {row['course_title']}\n"
+            f"  {week_label} | ساعت {start_time} تا {end_time}"
+        )
+
+    return "\n".join(lines)
+
+
+async def get_week_alarm_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = load_week_data()
+    ensure_week_users_shape(data)
+
+    user_id = get_week_user_id(update)
+    ensure_user_week_data(data, user_id)
+    save_week_data(data)
+
+    await update.message.reply_text(
+        "⏰ پنل برنامه هفتگی\n\nیکی از گزینه‌ها را انتخاب کن:",
+        reply_markup=build_user_week_root_keyboard(),
+    )
+
+    return WEEK_USER_ROOT
+
+
+async def user_week_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = load_week_data()
+    ensure_week_users_shape(data)
+
+    user_id = get_week_user_id(update)
+    user_data = ensure_user_week_data(data, user_id)
+
+    callback = query.data or ""
+
+    if callback == "uweek_close":
+        save_week_data(data)
+        await query.edit_message_text("✅ پنل برنامه هفتگی بسته شد.")
+        return ConversationHandler.END
+
+    if callback == "uweek_back_root":
+        save_week_data(data)
+        await query.edit_message_text(
+            "⏰ پنل برنامه هفتگی\n\nیکی از گزینه‌ها را انتخاب کن:",
+            reply_markup=build_user_week_root_keyboard(),
+        )
+        return WEEK_USER_ROOT
+
+    if callback == "uweek_my_courses":
+        text = format_my_courses_text(data, user_data)
+        save_week_data(data)
+
+        await query.edit_message_text(
+            text,
+            reply_markup=build_my_courses_keyboard(),
+        )
+        return WEEK_USER_ROOT
+
+    if callback == "uweek_add_course_menu":
+        if not get_root_groups(data):
+            await query.answer("هنوز هیچ گروهی توسط ادمین ساخته نشده.", show_alert=True)
+            return WEEK_USER_ROOT
+
+        await query.edit_message_text(
+            "➕ افزودن درس\n\n"
+            "راهنما:\n"
+            "🔵 یعنی این مورد زیرمجموعه دارد.\n"
+            "🟢 یعنی درس نهایی است و با کلیک اضافه می‌شود.",
+            reply_markup=build_user_group_browser_keyboard(data, parent_id=None),
+        )
+        return WEEK_USER_ROOT
+
+    if callback.startswith("uweek_browse:"):
+        group_id = callback.split(":", 1)[1]
+
+        if group_id in {"None", "", "null"}:
+            await query.edit_message_text(
+                "➕ افزودن درس\n\n"
+                "🔵 زیرمجموعه دارد.\n"
+                "🟢 درس نهایی است.",
+                reply_markup=build_user_group_browser_keyboard(data, parent_id=None),
+            )
+            return WEEK_USER_ROOT
+
+        group = data.get("groups", {}).get(group_id)
+        if not group:
+            await query.answer("این گروه پیدا نشد.", show_alert=True)
+            return WEEK_USER_ROOT
+
+        await query.edit_message_text(
+            f"📁 {get_group_title_path(data, group_id)}\n\nزیرمجموعه را انتخاب کن:",
+            reply_markup=build_user_group_browser_keyboard(data, parent_id=group_id),
+        )
+        return WEEK_USER_ROOT
+
+    if callback.startswith("uweek_add_course:"):
+        group_id = callback.split(":", 1)[1]
+
+        group = data.get("groups", {}).get(group_id)
+        if not group:
+            await query.answer("این درس پیدا نشد.", show_alert=True)
+            return WEEK_USER_ROOT
+
+        if group_has_children(data, group_id):
+            await query.edit_message_text(
+                f"📁 {get_group_title_path(data, group_id)}\n\nاین مورد زیرمجموعه دارد؛ یکی را انتخاب کن:",
+                reply_markup=build_user_group_browser_keyboard(data, parent_id=group_id),
+            )
+            return WEEK_USER_ROOT
+
+        courses = user_data.setdefault("courses", [])
+        course_title = get_group_title_path(data, group_id)
+
+        if group_id in courses:
+            await query.answer("این درس قبلاً اضافه شده.", show_alert=True)
+        else:
+            courses.append(group_id)
+            await query.answer("درس اضافه شد.", show_alert=True)
+
+        save_week_data(data)
+
+        await query.edit_message_text(
+            f"✅ درس اضافه شد:\n{course_title}\n\n"
+            f"{format_my_courses_text(data, user_data)}",
+            reply_markup=build_my_courses_keyboard(),
+        )
+        return WEEK_USER_ROOT
+
+    if callback == "uweek_delete_course_menu":
+        courses = clean_user_courses(data, user_data)
+
+        if not courses:
+            save_week_data(data)
+            await query.answer("هیچ درسی برای حذف نداری.", show_alert=True)
+            await query.edit_message_text(
+                format_my_courses_text(data, user_data),
+                reply_markup=build_my_courses_keyboard(),
+            )
+            return WEEK_USER_ROOT
+
+        save_week_data(data)
+
+        await query.edit_message_text(
+            "➖ حذف درس\n\nروی درسی که می‌خواهی حذف شود بزن:",
+            reply_markup=build_delete_my_course_keyboard(data, user_data),
+        )
+        return WEEK_USER_ROOT
+
+    if callback.startswith("uweek_delete_course:"):
+        group_id = callback.split(":", 1)[1]
+        course_title = get_group_title_path(data, group_id)
+
+        old_courses = user_data.get("courses", [])
+        user_data["courses"] = [item for item in old_courses if item != group_id]
+
+        save_week_data(data)
+
+        await query.edit_message_text(
+            f"✅ درس حذف شد:\n{course_title}\n\n"
+            f"{format_my_courses_text(data, user_data)}",
+            reply_markup=build_my_courses_keyboard(),
+        )
+        return WEEK_USER_ROOT
+
+    if callback == "uweek_full_schedule":
+        text = format_user_full_schedule(data, user_data)
+        save_week_data(data)
+
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📚 درس‌های من", callback_data="uweek_my_courses")],
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="uweek_back_root")],
+            ]),
+        )
+        return WEEK_USER_ROOT
+
+    return WEEK_USER_ROOT
