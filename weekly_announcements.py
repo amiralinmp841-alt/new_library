@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
-from week_storage import load_week_data, save_week_data
+from week_storage import load_week_data, save_week_data, upload_weekly_to_telegram
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
