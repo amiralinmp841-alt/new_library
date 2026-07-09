@@ -438,24 +438,6 @@ async def set_week_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("week_parent_for_new_group", None)
     return WEEK_ROOT
 
-# ========== بکاپ دستی ===============
-# وضعیت برای ConversationHandler جدید
-WEEK_WAITING_BACKUP_FILE = 99
-
-async def handle_week_backup_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "week_backup_get":
-        # ارسال فایل به کاربر
-        await query.message.reply_document(document=open(WEEK_FILE, "rb"), caption="این هم فایل بکاپ فعلی")
-        return WEEK_ROOT # یا هر استیت اصلی که داری
-
-    elif query.data == "week_backup_upload_prompt":
-        await query.edit_message_text("لطفاً فایل `week.json` جدید را همین‌جا بفرستید.")
-        # باید یک استیت برای انتظار فایل ست کنی
-        context.user_data["week_state"] = WEEK_WAITING_BACKUP_FILE
-        return WEEK_WAITING_BACKUP_FILE
 
 async def week_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1989,7 +1971,38 @@ def collect_group_and_children_ids(data, group_id):
         result.extend(collect_group_and_children_ids(data, child_id))
     return result
 
+# ========== بکاپ دستی ===============
+# وضعیت برای ConversationHandler جدید
+WEEK_WAITING_BACKUP_FILE = 99
 
+async def handle_week_backup_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "week_backup_get":
+        if not os.path.exists(WEEK_FILE):
+            await query.message.reply_text("❌ فایل بکاپ week.json پیدا نشد.")
+            return WEEK_ROOT
+
+        try:
+            with open(WEEK_FILE, "rb") as backup_file:
+                await query.message.reply_document(
+                    document=backup_file,
+                    filename="week.json",
+                    caption="📥 این هم فایل بکاپ فعلی الارم‌ها."
+                )
+        except Exception as e:
+            await query.message.reply_text(f"❌ خطا در ارسال بکاپ:\n{e}")
+
+        return WEEK_ROOT
+
+    if query.data == "week_backup_upload_prompt":
+        await query.edit_message_text(
+            "📤 لطفاً فایل `week.json` جدید را به صورت Document بفرستید."
+        )
+        return WEEK_WAITING_BACKUP_FILE
+
+    return WEEK_ROOT
 
 async def receive_week_backup_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.document:
