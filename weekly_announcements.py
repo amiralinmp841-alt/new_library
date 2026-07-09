@@ -1120,10 +1120,30 @@ def format_user_full_schedule(data, user_data):
     if not schedule_rows:
         return "برای درس‌های انتخابی تو هنوز هیچ برنامه‌ای ثبت نشده."
 
-    schedule_rows.sort(
+    def week_bucket(schedule):
+        mode = schedule.get("mode", "single")
+        offset = int(schedule.get("week_offset", 0))
+
+        if mode == "recurring":
+            return (999, "هفته های بعد")
+        return (offset, canonical_week_label(mode, offset))
+
+    expanded_rows = []
+    for row in schedule_rows:
+        schedule = row["schedule"]
+        days = schedule.get("days", []) or ["بدون روز"]
+
+        for day in days:
+            expanded_rows.append({
+                "course_title": row["course_title"],
+                "schedule": schedule,
+                "day": day,
+            })
+
+    expanded_rows.sort(
         key=lambda row: (
-            get_day_sort_index(row["schedule"]),
-            int(row["schedule"].get("week_offset", 0)),
+            week_bucket(row["schedule"])[0],
+            ALL_DAYS.index(row["day"]) if row["day"] in ALL_DAYS else 99,
             row["schedule"].get("start_time", "99:99"),
             row["course_title"],
         )
@@ -1131,29 +1151,32 @@ def format_user_full_schedule(data, user_data):
 
     lines = ["📅 برنامه کل هفتگی من:"]
 
+    current_week = None
     current_day = None
-    for row in schedule_rows:
+
+    for row in expanded_rows:
         schedule = row["schedule"]
-        days_text = " و ".join(schedule.get("days", [])) or "بدون روز"
+        day = row["day"]
+        week_order, week_label = week_bucket(schedule)
 
-        if days_text != current_day:
-            current_day = days_text
-            lines.append(f"\n🔹 {days_text}")
+        if week_label != current_week:
+            current_week = week_label
+            current_day = None
+            lines.append(f"\n📌 {week_label}")
 
-        week_label = schedule.get("week_label") or canonical_week_label(
-            schedule.get("mode", "single"),
-            int(schedule.get("week_offset", 0))
-        )
+        if day != current_day:
+            current_day = day
+            lines.append(f"🔹 {day}")
 
         start_time = schedule.get("start_time", "--:--")
         end_time = schedule.get("end_time", "--:--")
 
         lines.append(
-            f"• {row['course_title']}\n"
-            f"  {week_label} | ساعت {start_time} تا {end_time}"
+            f"• {row['course_title']} | ساعت {start_time} تا {end_time}"
         )
 
     return "\n".join(lines)
+
 
 
 async def get_week_alarm_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
