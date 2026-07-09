@@ -2,7 +2,8 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, time
+from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -13,6 +14,7 @@ WEEK_ROOT = "week_root"
 WEEK_WAITING_GROUP_NAME = "week_waiting_group_name"
 WEEK_WAITING_ADD_TIME = "week_waiting_add_time"
 WEEK_WAITING_DELETE_TIME = "week_waiting_delete_time"
+TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 
 PERSIAN_DAY_ALIASES = {
     "شنبه": "شنبه",
@@ -268,7 +270,7 @@ def parse_schedule_line(line: str):
         "days": days,
         "start_time": time_info["start_time"],
         "end_time": time_info["end_time"],
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": get_now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
@@ -323,7 +325,7 @@ def get_group_children(data, group_id):
 
 def ensure_group_shape(group_data):
     group_data.setdefault("title", "بدون نام")
-    group_data.setdefault("created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    group_data.setdefault("created_at", get_now().strftime("%Y-%m-%d %H:%M:%S"))
     group_data.setdefault("schedules", [])
     group_data.setdefault("children", [])
     group_data.setdefault("parent_id", None)
@@ -564,7 +566,7 @@ async def week_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
         affected_group_ids = collect_group_and_children_ids(data, group_id)
         removed_map = {}
-        
+
         for removed_group_id, removed_schedules in removed_map.items():
             if removed_schedules:
                 await dispatch_cancel_for_removed_schedules(
@@ -684,7 +686,7 @@ async def receive_week_group_name(update: Update, context: ContextTypes.DEFAULT_
 
     data.setdefault("groups", {})[group_id] = ensure_group_shape({
         "title": group_name,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": get_now().strftime("%Y-%m-%d %H:%M:%S"),
         "schedules": [],
         "children": [],
         "parent_id": parent_id,
@@ -1623,12 +1625,9 @@ async def toggle_week_alarm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================الارم واقعی =====================
 
-from datetime import datetime, timedelta, time
-
-
 def get_now():
-    return datetime.now()
-
+    return datetime.now(TEHRAN_TZ)
+    
 
 def get_day_index(day_name: str):
     try:
@@ -1639,8 +1638,9 @@ def get_day_index(day_name: str):
 
 def get_start_of_current_week(now=None):
     now = now or get_now()
-    # فرض: شنبه شروع هفته است
-    python_weekday = now.weekday()  # Monday=0 ... Sunday=6
+
+    # Python weekday: Monday=0 ... Sunday=6
+    # ما می‌خواهیم شنبه=0 ... جمعه=6
     day_map = {
         5: 0,  # Saturday
         6: 1,  # Sunday
@@ -1650,14 +1650,18 @@ def get_start_of_current_week(now=None):
         3: 5,  # Thursday
         4: 6,  # Friday
     }
-    current_idx = day_map[python_weekday]
+
+    current_idx = day_map[now.weekday()]
     start_date = (now - timedelta(days=current_idx)).date()
     return start_date
 
 
 def combine_date_and_hhmm(target_date, hhmm: str):
     hour, minute = [int(x) for x in hhmm.split(":")]
-    return datetime.combine(target_date, time(hour=hour, minute=minute))
+    return datetime(
+        target_date.year, target_date.month, target_date.day,
+        hour, minute, tzinfo=TEHRAN_TZ
+    )
 
 
 def get_schedule_occurrences(schedule, horizon_weeks=8, now=None):
