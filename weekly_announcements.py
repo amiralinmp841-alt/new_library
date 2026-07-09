@@ -1292,7 +1292,11 @@ async def get_week_alarm_entry(update: Update, context: ContextTypes.DEFAULT_TYP
 
     user_id = get_week_user_id(update)
     ensure_user_week_data(data, user_id)
-    save_week_data(data)
+    changed = ensure_week_users_shape(data)
+    changed = ensure_user_week_data(data, user_id) or changed
+    
+    if changed:
+        save_week_data(data)
 
     await update.message.reply_text(
         "⏰ پنل برنامه هفتگی\n\nیکی از گزینه‌ها را انتخاب کن:",
@@ -1320,7 +1324,7 @@ async def user_week_callback_handler(update: Update, context: ContextTypes.DEFAU
         return ConversationHandler.END
 
     if callback == "uweek_back_root":
-        save_week_data(data)
+        #save_week_data(data)
         await query.edit_message_text(
             "⏰ پنل برنامه هفتگی\n\nیکی از گزینه‌ها را انتخاب کن:",
             reply_markup=build_user_week_root_keyboard(),
@@ -1329,7 +1333,7 @@ async def user_week_callback_handler(update: Update, context: ContextTypes.DEFAU
 
     if callback == "uweek_my_courses":
         text = format_my_courses_text(data, user_data)
-        save_week_data(data)
+        #save_week_data(data)
 
         await query.edit_message_text(
             text,
@@ -1408,18 +1412,20 @@ async def user_week_callback_handler(update: Update, context: ContextTypes.DEFAU
         return WEEK_USER_ROOT
 
     if callback == "uweek_delete_course_menu":
+        changed = clean_user_courses(data, user_data)
         courses = clean_user_courses(data, user_data)
 
         if not courses:
-            save_week_data(data)
+            if changed:
+                save_week_data(data)
             await query.answer("هیچ درسی برای حذف نداری.", show_alert=True)
             await query.edit_message_text(
                 format_my_courses_text(data, user_data),
                 reply_markup=build_my_courses_keyboard(),
             )
             return WEEK_USER_ROOT
-
-        save_week_data(data)
+        if changed:
+            save_week_data(data)
 
         await query.edit_message_text(
             "➖ حذف درس\n\nروی درسی که می‌خواهی حذف شود بزن:",
@@ -1445,7 +1451,7 @@ async def user_week_callback_handler(update: Update, context: ContextTypes.DEFAU
 
     if callback == "uweek_full_schedule":
         text = format_user_full_schedule(data, user_data)
-        save_week_data(data)
+        #save_week_data(data)
 
         await query.edit_message_text(
             text,
@@ -1458,7 +1464,9 @@ async def user_week_callback_handler(update: Update, context: ContextTypes.DEFAU
 
     if callback == "uweek_alarm_menu":
         ensure_user_alarm_defaults(user_data)
-        save_week_data(data)
+        changed = ensure_user_alarm_defaults(user_data)
+        if changed:
+            save_week_data(data)
         await query.edit_message_text(
             format_alarm_summary(data, user_data),
             reply_markup=build_alarm_root_keyboard(),
