@@ -6224,7 +6224,7 @@ def build_application():
 
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
-                CallbackQueryHandler(handle_week_backup_actions,pattern=r"^week_backup_(get|upload_prompt)$"),
+                #CallbackQueryHandler(handle_week_backup_actions,pattern=r"^week_backup_(get|upload_prompt)$"),
                 
 
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation),
@@ -6306,7 +6306,14 @@ def build_application():
             ],
 
             WEEK_ROOT: [
-                CallbackQueryHandler(week_callback_handler, pattern=r"^week_"),
+                CallbackQueryHandler(
+                    handle_week_backup_actions,
+                    pattern=r"^week_backup_(get|upload_prompt)$"
+                ),
+                CallbackQueryHandler(
+                    week_callback_handler,
+                    pattern=r"^week_"
+                ),
             ],
             
             WEEK_WAITING_GROUP_NAME: [
@@ -6336,7 +6343,9 @@ def build_application():
             ],
 
             WEEK_WAITING_BACKUP_FILE: [
-                MessageHandler(filters.Document.ALL, receive_week_backup_file)
+                CommandHandler("cancel", week_cancel),
+                MessageHandler(filters.Document.ALL, receive_week_backup_file),
+                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_backup_file),
             ],
             
             WAITING_CHAT_MESSAGE: [
