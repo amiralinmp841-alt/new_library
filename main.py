@@ -49,12 +49,18 @@ from weekly_announcements import (
     week_cancel,
     get_week_alarm_entry,
     user_week_callback_handler,
+    receive_week_alarm_days,
+    receive_week_alarm_time,
+    toggle_week_alarm,
     WEEK_ROOT,
     WEEK_WAITING_GROUP_NAME,
     WEEK_WAITING_ADD_TIME,
     WEEK_WAITING_DELETE_TIME,
     WEEK_USER_ROOT,
+    WEEK_WAITING_ALARM_DAYS,
+    WEEK_WAITING_ALARM_TIME,
 )
+
 
 import copy
 from flask import Flask
@@ -6197,6 +6203,7 @@ def build_application():
         entry_points=[
             CommandHandler("start", start),
             CommandHandler("set_week", set_week_entry),
+            CommandHandler("alarm", toggle_week_alarm),
             CommandHandler("get_week_alarm", get_week_alarm_entry),
         ],
         states={
@@ -6314,7 +6321,14 @@ def build_application():
             WEEK_USER_ROOT: [
                 CallbackQueryHandler(user_week_callback_handler, pattern=r"^uweek_"),
             ],
-             
+
+            WEEK_WAITING_ALARM_DAYS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_week_alarm_days),
+            ],
+            WEEK_WAITING_ALARM_TIME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_week_alarm_time),
+            ],
+            
             WAITING_CHAT_MESSAGE: [
                 CommandHandler("cancel", cancel),
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_chat_message),
