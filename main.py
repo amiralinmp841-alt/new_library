@@ -61,6 +61,7 @@ from weekly_announcements import (
     WEEK_WAITING_ALARM_TIME,
     process_weekly_alarm_queue,
     receive_week_backup_file,
+    WEEK_WAITING_BACKUP_FILE,
 )
 
 
