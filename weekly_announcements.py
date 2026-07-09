@@ -977,7 +977,85 @@ def ensure_user_week_data(data, user_id):
     ensure_week_users_shape(data)
     data["users"].setdefault(user_id, {"courses": []})
     data["users"][user_id].setdefault("courses", [])
+    ensure_user_alarm_defaults(data["users"][user_id])
     return data["users"][user_id]
+
+
+WEEK_WAITING_ALARM_DAYS = "week_waiting_alarm_days"
+WEEK_WAITING_ALARM_TIME = "week_waiting_alarm_time"
+
+
+def ensure_user_alarm_defaults(user_data):
+    user_data.setdefault("alarm_enabled", True)
+    user_data.setdefault("alarm_all", {
+        "days_before": 1,
+        "time": "06:00",
+    })
+    user_data.setdefault("course_alarms", {})
+    return user_data
+
+
+def build_alarm_root_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("🔔 الارم برای همه درس‌ها", callback_data="uweek_alarm_all")],
+        [InlineKeyboardButton("📚 الارم برای درس خاص", callback_data="uweek_alarm_course_menu")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="uweek_back_root")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_alarm_course_picker_keyboard(data, user_data):
+    courses = clean_user_courses(data, user_data)
+    keyboard = []
+
+    for group_id in courses:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🔔 {get_group_title_path(data, group_id)}",
+                callback_data=f"uweek_alarm_course:{group_id}"
+            )
+        ])
+
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="uweek_alarm_menu")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def format_alarm_summary(data, user_data):
+    ensure_user_alarm_defaults(user_data)
+
+    lines = [
+        "🔔 تنظیمات الارم:",
+        f"وضعیت کلی: {'روشن' if user_data.get('alarm_enabled', True) else 'خاموش'}",
+    ]
+
+    alarm_all = user_data.get("alarm_all", {})
+    lines.append(
+        f"برای همه درس‌ها: {alarm_all.get('days_before', 1)} روز قبل، ساعت {alarm_all.get('time', '06:00')}"
+    )
+
+    course_alarms = user_data.get("course_alarms", {})
+    if course_alarms:
+        lines.append("\nالارم درس‌های خاص:")
+        for group_id, alarm in course_alarms.items():
+            if group_id in data.get("groups", {}):
+                lines.append(
+                    f"- {get_group_title_path(data, group_id)}: "
+                    f"{alarm.get('days_before', 1)} روز قبل، ساعت {alarm.get('time', '06:00')}"
+                )
+
+    return "\n".join(lines)
+
+
+def parse_alarm_days_before(text: str):
+    text = normalize_schedule_text(text)
+    match = re.search(r"(\d+)", text)
+    if not match:
+        return None
+
+    value = int(match.group(1))
+    if value < 0 or value > 30:
+        return None
+    return value
 
 
 def group_has_children(data, group_id):
@@ -1011,6 +1089,7 @@ def build_user_week_root_keyboard():
     keyboard = [
         [InlineKeyboardButton("📚 درس‌های من", callback_data="uweek_my_courses")],
         [InlineKeyboardButton("📅 برنامه کل هفتگی من", callback_data="uweek_full_schedule")],
+        [InlineKeyboardButton("🔔 تعیین الارم", callback_data="uweek_alarm_menu")],
         [InlineKeyboardButton("❌ بستن", callback_data="uweek_close")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -1120,29 +1199,48 @@ def format_user_full_schedule(data, user_data):
     if not schedule_rows:
         return "برای درس‌های انتخابی تو هنوز هیچ برنامه‌ای ثبت نشده."
 
-    def week_bucket(schedule):
-        mode = schedule.get("mode", "single")
-        offset = int(schedule.get("week_offset", 0))
-
-        if mode == "recurring":
-            return (999, "هفته های بعد")
-        return (offset, canonical_week_label(mode, offset))
+    def week_label_from_offset(offset):
+        if offset == 0:
+            return "این هفته"
+        elif offset == 1:
+            return "هفته بعد"
+        else:
+            return f"{offset} هفته بعد"
 
     expanded_rows = []
+
     for row in schedule_rows:
         schedule = row["schedule"]
+        mode = schedule.get("mode", "single")
+        offset = int(schedule.get("week_offset", 0))
         days = schedule.get("days", []) or ["بدون روز"]
 
-        for day in days:
-            expanded_rows.append({
-                "course_title": row["course_title"],
-                "schedule": schedule,
-                "day": day,
-            })
+        week_entries = []
+
+        if mode == "recurring":
+            # در این هفته و هفته بعد و 2 هفته بعد نمایش بده
+            week_entries.extend([
+                (0, "این هفته"),
+                (1, "هفته بعد"),
+                (2, "2 هفته بعد"),
+                (999, "هفته های بعد"),
+            ])
+        else:
+            week_entries.append((offset, week_label_from_offset(offset)))
+
+        for week_order, week_label in week_entries:
+            for day in days:
+                expanded_rows.append({
+                    "course_title": row["course_title"],
+                    "schedule": schedule,
+                    "day": day,
+                    "week_order": week_order,
+                    "week_label": week_label,
+                })
 
     expanded_rows.sort(
         key=lambda row: (
-            week_bucket(row["schedule"])[0],
+            row["week_order"],
             ALL_DAYS.index(row["day"]) if row["day"] in ALL_DAYS else 99,
             row["schedule"].get("start_time", "99:99"),
             row["course_title"],
@@ -1157,7 +1255,7 @@ def format_user_full_schedule(data, user_data):
     for row in expanded_rows:
         schedule = row["schedule"]
         day = row["day"]
-        week_order, week_label = week_bucket(schedule)
+        week_label = row["week_label"]
 
         if week_label != current_week:
             current_week = week_label
@@ -1176,7 +1274,6 @@ def format_user_full_schedule(data, user_data):
         )
 
     return "\n".join(lines)
-
 
 
 async def get_week_alarm_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1349,4 +1446,142 @@ async def user_week_callback_handler(update: Update, context: ContextTypes.DEFAU
         )
         return WEEK_USER_ROOT
 
+    if callback == "uweek_alarm_menu":
+        ensure_user_alarm_defaults(user_data)
+        save_week_data(data)
+        await query.edit_message_text(
+            format_alarm_summary(data, user_data),
+            reply_markup=build_alarm_root_keyboard(),
+        )
+        return WEEK_USER_ROOT
+
+    if callback == "uweek_alarm_all":
+        context.user_data["week_alarm_target"] = {"type": "all"}
+        context.user_data["week_state"] = WEEK_WAITING_ALARM_DAYS
+        await query.message.reply_text(
+            "برای همه درس‌ها، چند روز قبل الارم داده شود؟\n"
+            "مثال: 1 روز / 2 روز / 0"
+        )
+        return WEEK_WAITING_ALARM_DAYS
+
+    if callback == "uweek_alarm_course_menu":
+        courses = clean_user_courses(data, user_data)
+        if not courses:
+            await query.answer("اول باید حداقل یک درس اضافه کنی.", show_alert=True)
+            return WEEK_USER_ROOT
+
+        await query.edit_message_text(
+            "درس موردنظر برای الارم اختصاصی را انتخاب کن:",
+            reply_markup=build_alarm_course_picker_keyboard(data, user_data),
+        )
+        return WEEK_USER_ROOT
+
+    if callback.startswith("uweek_alarm_course:"):
+        group_id = callback.split(":", 1)[1]
+        if group_id not in data.get("groups", {}):
+            await query.answer("درس پیدا نشد.", show_alert=True)
+            return WEEK_USER_ROOT
+
+        context.user_data["week_alarm_target"] = {"type": "course", "group_id": group_id}
+        context.user_data["week_state"] = WEEK_WAITING_ALARM_DAYS
+
+        await query.message.reply_text(
+            f"برای درس «{get_group_title_path(data, group_id)}» چند روز قبل الارم داده شود؟\n"
+            "مثال: 1 روز / 2 روز / 0"
+        )
+        return WEEK_WAITING_ALARM_DAYS
+
+
     return WEEK_USER_ROOT
+
+async def receive_week_alarm_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    value = parse_alarm_days_before(update.message.text or "")
+    if value is None:
+        await update.message.reply_text("❌ عدد معتبر وارد کن. مثال: 1 روز / 2 روز / 0")
+        return WEEK_WAITING_ALARM_DAYS
+
+    context.user_data["week_alarm_days_before"] = value
+    context.user_data["week_state"] = WEEK_WAITING_ALARM_TIME
+
+    await update.message.reply_text(
+        "ساعت الارم را وارد کن.\n"
+        "مثال: 06:00 یا 18:30"
+    )
+    return WEEK_WAITING_ALARM_TIME
+
+
+async def receive_week_alarm_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    time_value = normalize_time_value((update.message.text or "").strip())
+    if not time_value:
+        await update.message.reply_text("❌ ساعت معتبر نیست. مثال درست: 06:00")
+        return WEEK_WAITING_ALARM_TIME
+
+    data = load_week_data()
+    ensure_week_users_shape(data)
+
+    user_id = get_week_user_id(update)
+    user_data = ensure_user_week_data(data, user_id)
+
+    target = context.user_data.get("week_alarm_target")
+    days_before = context.user_data.get("week_alarm_days_before", 1)
+
+    if not target:
+        await update.message.reply_text("❌ مقصد الارم مشخص نیست. دوباره /get_week_alarm را بزن.")
+        return ConversationHandler.END
+
+    if target["type"] == "all":
+        user_data["alarm_all"] = {
+            "days_before": days_before,
+            "time": time_value,
+        }
+        message = (
+            f"✅ الارم همه درس‌ها تنظیم شد:\n"
+            f"{days_before} روز قبل، ساعت {time_value}"
+        )
+    else:
+        group_id = target.get("group_id")
+        if group_id not in data.get("groups", {}):
+            await update.message.reply_text("❌ درس پیدا نشد. دوباره تلاش کن.")
+            return ConversationHandler.END
+
+        user_data.setdefault("course_alarms", {})[group_id] = {
+            "days_before": days_before,
+            "time": time_value,
+        }
+        message = (
+            f"✅ الارم درس «{get_group_title_path(data, group_id)}» تنظیم شد:\n"
+            f"{days_before} روز قبل، ساعت {time_value}"
+        )
+
+    save_week_data(data)
+
+    context.user_data["week_state"] = WEEK_USER_ROOT
+    context.user_data.pop("week_alarm_target", None)
+    context.user_data.pop("week_alarm_days_before", None)
+
+    await update.message.reply_text(message)
+    await update.message.reply_text(
+        format_alarm_summary(data, user_data),
+        reply_markup=build_alarm_root_keyboard(),
+    )
+    return WEEK_USER_ROOT
+
+
+async def toggle_week_alarm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = load_week_data()
+    ensure_week_users_shape(data)
+
+    user_id = get_week_user_id(update)
+    user_data = ensure_user_week_data(data, user_id)
+
+    current = user_data.get("alarm_enabled", True)
+    user_data["alarm_enabled"] = not current
+    save_week_data(data)
+
+    if user_data["alarm_enabled"]:
+        await update.message.reply_text(
+            "🔔 الارم‌ها روشن شدند.\n"
+            "دیفالت فعلی: برای همه درس‌ها، 1 روز قبل، ساعت 06:00"
+        )
+    else:
+        await update.message.reply_text("🔕 الارم‌ها خاموش شدند.")
