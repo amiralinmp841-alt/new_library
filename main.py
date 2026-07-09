@@ -6330,6 +6330,10 @@ def build_application():
             WEEK_WAITING_ALARM_TIME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_week_alarm_time),
             ],
+
+            WEEK_WAITING_BACKUP_FILE: [
+                MessageHandler(filters.Document.ALL, receive_week_backup_file)
+            ],
             
             WAITING_CHAT_MESSAGE: [
                 CommandHandler("cancel", cancel),
