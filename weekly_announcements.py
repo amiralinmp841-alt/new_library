@@ -562,6 +562,23 @@ async def week_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         group_title = group.get("title", "بدون نام")
         parent_id = group.get("parent_id")
 
+        affected_group_ids = collect_group_and_children_ids(data, group_id)
+        removed_map = {}
+        
+        for removed_group_id, removed_schedules in removed_map.items():
+            if removed_schedules:
+                await dispatch_cancel_for_removed_schedules(
+                    context.bot,
+                    data,
+                    removed_group_id,
+                    removed_schedules,
+                )
+
+        for gid in affected_group_ids:
+            group_item = data.get("groups", {}).get(gid)
+            if group_item:
+                removed_map[gid] = list(group_item.get("schedules", []))
+
         delete_group_recursive(data, group_id)
         save_week_data(data)
 
@@ -737,6 +754,14 @@ async def receive_week_time_text(update: Update, context: ContextTypes.DEFAULT_T
             added.append(item)
 
     save_week_data(data)
+
+    if added:
+        await dispatch_immediate_alarms_for_new_schedules(
+            context.bot,
+            data,
+            group_id,
+            added,
+        )
 
     msg = []
     if added:
@@ -941,6 +966,13 @@ async def receive_week_delete_text(update: Update, context: ContextTypes.DEFAULT
     group_data["schedules"] = kept
     save_week_data(data)
 
+    await dispatch_cancel_for_removed_schedules(
+        context.bot,
+        data,
+        group_id,
+        removed,
+    )
+
     removed_lines = "\n".join([f"- {format_schedule_item(item)}" for item in removed])
 
     await update.message.reply_text(
@@ -992,6 +1024,8 @@ def ensure_user_alarm_defaults(user_data):
         "time": "06:00",
     })
     user_data.setdefault("course_alarms", {})
+    user_data.setdefault("alarm_sent", {})
+    user_data.setdefault("alarm_cancel_sent", {})
     return user_data
 
 
@@ -1585,3 +1619,309 @@ async def toggle_week_alarm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text("🔕 الارم‌ها خاموش شدند.")
+
+
+# ==================الارم واقعی =====================
+
+from datetime import datetime, timedelta, time
+
+
+def get_now():
+    return datetime.now()
+
+
+def get_day_index(day_name: str):
+    try:
+        return ALL_DAYS.index(day_name)
+    except ValueError:
+        return None
+
+
+def get_start_of_current_week(now=None):
+    now = now or get_now()
+    # فرض: شنبه شروع هفته است
+    python_weekday = now.weekday()  # Monday=0 ... Sunday=6
+    day_map = {
+        5: 0,  # Saturday
+        6: 1,  # Sunday
+        0: 2,  # Monday
+        1: 3,  # Tuesday
+        2: 4,  # Wednesday
+        3: 5,  # Thursday
+        4: 6,  # Friday
+    }
+    current_idx = day_map[python_weekday]
+    start_date = (now - timedelta(days=current_idx)).date()
+    return start_date
+
+
+def combine_date_and_hhmm(target_date, hhmm: str):
+    hour, minute = [int(x) for x in hhmm.split(":")]
+    return datetime.combine(target_date, time(hour=hour, minute=minute))
+
+
+def get_schedule_occurrences(schedule, horizon_weeks=8, now=None):
+    now = now or get_now()
+    start_of_week = get_start_of_current_week(now)
+    days = schedule.get("days", []) or []
+
+    occurrences = []
+    mode = schedule.get("mode", "single")
+    week_offset = int(schedule.get("week_offset", 0))
+    start_time = schedule.get("start_time")
+
+    if not start_time:
+        return occurrences
+
+    for day_name in days:
+        day_idx = get_day_index(day_name)
+        if day_idx is None:
+            continue
+
+        if mode == "single":
+            target_date = start_of_week + timedelta(days=(week_offset * 7 + day_idx))
+            class_dt = combine_date_and_hhmm(target_date, start_time)
+            occurrences.append({
+                "class_datetime": class_dt,
+                "day_name": day_name,
+                "week_offset": week_offset,
+                "mode": mode,
+            })
+        else:
+            for offset in range(horizon_weeks):
+                target_date = start_of_week + timedelta(days=(offset * 7 + day_idx))
+                class_dt = combine_date_and_hhmm(target_date, start_time)
+                occurrences.append({
+                    "class_datetime": class_dt,
+                    "day_name": day_name,
+                    "week_offset": offset,
+                    "mode": mode,
+                })
+
+    occurrences.sort(key=lambda x: x["class_datetime"])
+    return occurrences
+
+
+def build_occurrence_key(group_id, schedule, occurrence):
+    schedule_id = schedule.get("id", "noid")
+    class_dt = occurrence["class_datetime"].strftime("%Y-%m-%d %H:%M")
+    return f"{group_id}__{schedule_id}__{class_dt}"
+
+
+def get_user_alarm_config_for_group(user_data, group_id):
+    ensure_user_alarm_defaults(user_data)
+    course_alarm = user_data.get("course_alarms", {}).get(group_id)
+    if course_alarm:
+        return course_alarm
+    return user_data.get("alarm_all", {"days_before": 1, "time": "06:00"})
+
+
+def compute_alarm_datetime(class_dt, alarm_config):
+    days_before = int(alarm_config.get("days_before", 1))
+    alarm_time = alarm_config.get("time", "06:00")
+    alarm_date = (class_dt - timedelta(days=days_before)).date()
+    return combine_date_and_hhmm(alarm_date, alarm_time)
+
+
+def canonical_week_label_for_offset(offset):
+    if offset == 0:
+        return "این هفته"
+    if offset == 1:
+        return "هفته بعد"
+    return f"{offset} هفته بعد"
+
+
+def format_alarm_fire_message(course_title, occurrence, schedule):
+    class_dt = occurrence["class_datetime"]
+    start_time = schedule.get("start_time", "--:--")
+    end_time = schedule.get("end_time", "--:--")
+    week_label = canonical_week_label_for_offset(occurrence["week_offset"])
+    return (
+        "🔔 یادآوری کلاس\n\n"
+        f"درس: {course_title}\n"
+        f"روز: {occurrence['day_name']}\n"
+        f"هفته: {week_label}\n"
+        f"ساعت کلاس: {start_time} تا {end_time}\n\n"
+        "کلاس شما در این زمان برگزار می‌شود."
+    )
+
+
+def format_alarm_cancel_message(course_title, occurrence, schedule):
+    class_dt = occurrence["class_datetime"]
+    start_time = schedule.get("start_time", "--:--")
+    end_time = schedule.get("end_time", "--:--")
+    week_label = canonical_week_label_for_offset(occurrence["week_offset"])
+    return (
+        "🚫 اعلان کلاس لغو شد\n\n"
+        f"درس: {course_title}\n"
+        f"روز: {occurrence['day_name']}\n"
+        f"هفته: {week_label}\n"
+        f"ساعت کلاس: {start_time} تا {end_time}\n\n"
+        "این برنامه حذف یا کنسل شده است."
+    )
+
+def get_interested_user_ids_for_group(data, group_id):
+    result = []
+    users = data.get("users", {})
+    for user_id, user_data in users.items():
+        ensure_user_alarm_defaults(user_data)
+        courses = clean_user_courses(data, user_data)
+        if group_id in courses and user_data.get("alarm_enabled", True):
+            result.append(user_id)
+    return result
+
+
+async def send_alarm_for_occurrence(bot, data, user_id, group_id, schedule, occurrence):
+    user_data = ensure_user_week_data(data, user_id)
+    sent_map = user_data.setdefault("alarm_sent", {})
+    cancel_map = user_data.setdefault("alarm_cancel_sent", {})
+
+    occurrence_key = build_occurrence_key(group_id, schedule, occurrence)
+    if sent_map.get(occurrence_key):
+        return False
+
+    course_title = get_group_title_path(data, group_id)
+    text = format_alarm_fire_message(course_title, occurrence, schedule)
+
+    try:
+        await bot.send_message(chat_id=int(user_id), text=text)
+    except Exception:
+        return False
+
+    sent_map[occurrence_key] = get_now().strftime("%Y-%m-%d %H:%M:%S")
+    cancel_map.pop(occurrence_key, None)
+    return True
+
+
+async def send_cancel_for_occurrence(bot, data, user_id, group_id, schedule, occurrence):
+    user_data = ensure_user_week_data(data, user_id)
+    sent_map = user_data.setdefault("alarm_sent", {})
+    cancel_map = user_data.setdefault("alarm_cancel_sent", {})
+
+    occurrence_key = build_occurrence_key(group_id, schedule, occurrence)
+
+    if not sent_map.get(occurrence_key):
+        return False
+
+    if cancel_map.get(occurrence_key):
+        return False
+
+    course_title = get_group_title_path(data, group_id)
+    text = format_alarm_cancel_message(course_title, occurrence, schedule)
+
+    try:
+        await bot.send_message(chat_id=int(user_id), text=text)
+    except Exception:
+        return False
+
+    cancel_map[occurrence_key] = get_now().strftime("%Y-%m-%d %H:%M:%S")
+    return True
+
+async def process_weekly_alarm_queue(context: ContextTypes.DEFAULT_TYPE):
+    data = load_week_data()
+    ensure_week_users_shape(data)
+    now = get_now()
+    changed = False
+
+    for user_id, user_data in data.get("users", {}).items():
+        ensure_user_alarm_defaults(user_data)
+
+        if not user_data.get("alarm_enabled", True):
+            continue
+
+        courses = clean_user_courses(data, user_data)
+
+        for group_id in courses:
+            group = data.get("groups", {}).get(group_id)
+            if not group:
+                continue
+
+            alarm_config = get_user_alarm_config_for_group(user_data, group_id)
+
+            for schedule in group.get("schedules", []):
+                occurrences = get_schedule_occurrences(schedule, horizon_weeks=8, now=now)
+
+                for occurrence in occurrences:
+                    class_dt = occurrence["class_datetime"]
+                    alarm_dt = compute_alarm_datetime(class_dt, alarm_config)
+
+                    if alarm_dt <= now < class_dt + timedelta(minutes=1):
+                        sent = await send_alarm_for_occurrence(
+                            context.bot,
+                            data,
+                            user_id,
+                            group_id,
+                            schedule,
+                            occurrence,
+                        )
+                        if sent:
+                            changed = True
+
+    if changed:
+        save_week_data(data)
+
+async def dispatch_immediate_alarms_for_new_schedules(bot, data, group_id, schedules):
+    now = get_now()
+    changed = False
+    user_ids = get_interested_user_ids_for_group(data, group_id)
+
+    for user_id in user_ids:
+        user_data = ensure_user_week_data(data, user_id)
+        alarm_config = get_user_alarm_config_for_group(user_data, group_id)
+
+        for schedule in schedules:
+            occurrences = get_schedule_occurrences(schedule, horizon_weeks=8, now=now)
+
+            for occurrence in occurrences:
+                class_dt = occurrence["class_datetime"]
+                alarm_dt = compute_alarm_datetime(class_dt, alarm_config)
+
+                if alarm_dt <= now < class_dt:
+                    sent = await send_alarm_for_occurrence(
+                        bot,
+                        data,
+                        user_id,
+                        group_id,
+                        schedule,
+                        occurrence,
+                    )
+                    if sent:
+                        changed = True
+
+    if changed:
+        save_week_data(data)
+
+async def dispatch_cancel_for_removed_schedules(bot, data, group_id, removed_schedules):
+    now = get_now()
+    changed = False
+    user_ids = get_interested_user_ids_for_group(data, group_id)
+
+    for user_id in user_ids:
+        for schedule in removed_schedules:
+            occurrences = get_schedule_occurrences(schedule, horizon_weeks=8, now=now)
+
+            for occurrence in occurrences:
+                class_dt = occurrence["class_datetime"]
+                if class_dt < now:
+                    continue
+
+                sent = await send_cancel_for_occurrence(
+                    bot,
+                    data,
+                    user_id,
+                    group_id,
+                    schedule,
+                    occurrence,
+                )
+                if sent:
+                    changed = True
+
+    if changed:
+        save_week_data(data)
+
+def collect_group_and_children_ids(data, group_id):
+    result = [group_id]
+    group = data.get("groups", {}).get(group_id, {})
+    for child_id in group.get("children", []):
+        result.extend(collect_group_and_children_ids(data, child_id))
+    return result
