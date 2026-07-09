@@ -59,6 +59,7 @@ from weekly_announcements import (
     WEEK_USER_ROOT,
     WEEK_WAITING_ALARM_DAYS,
     WEEK_WAITING_ALARM_TIME,
+    process_weekly_alarm_queue,
 )
 
 
@@ -6347,6 +6348,13 @@ def build_application():
 
     application.add_handler(conv_handler, group=1)
 
+    application.job_queue.run_repeating(
+        process_weekly_alarm_queue,
+        interval=300,
+        first=10,
+        name="weekly_alarm_queue",
+    )
+    
     return application
 
 # ================= HEALTH & WEBHOOK =================
