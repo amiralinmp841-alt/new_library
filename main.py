@@ -47,10 +47,13 @@ from weekly_announcements import (
     receive_week_time_text,
     receive_week_delete_text,
     week_cancel,
+    get_week_alarm_entry,
+    user_week_callback_handler,
     WEEK_ROOT,
     WEEK_WAITING_GROUP_NAME,
     WEEK_WAITING_ADD_TIME,
     WEEK_WAITING_DELETE_TIME,
+    WEEK_USER_ROOT,
 )
 
 import copy
@@ -6169,7 +6172,7 @@ def build_application():
     application.add_handler(CommandHandler("4", set_row_count), group=0)
     application.add_handler(CommandHandler("5", set_row_count), group=0)
     application.add_handler(CommandHandler("6", set_row_count), group=0)
-    application.add_handler(CommandHandler("set_week", set_week_entry), group=0)
+    #application.add_handler(CommandHandler("set_week", set_week_entry), group=0)
     # در کنار هندلرهای سراسری دیگر در build_application
     application.add_handler(CommandHandler("style", set_custom_layout), group=0)
 
@@ -6194,6 +6197,7 @@ def build_application():
         entry_points=[
             CommandHandler("start", start),
             CommandHandler("set_week", set_week_entry),
+            CommandHandler("get_week_alarm", get_week_alarm_entry),
         ],
         states={
             CHOOSING: [
@@ -6306,7 +6310,11 @@ def build_application():
                 CommandHandler("cancel", week_cancel),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_delete_text),
             ],
-            
+
+            WEEK_USER_ROOT: [
+                CallbackQueryHandler(user_week_callback_handler, pattern=r"^uweek_"),
+            ],
+             
             WAITING_CHAT_MESSAGE: [
                 CommandHandler("cancel", cancel),
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_chat_message),
