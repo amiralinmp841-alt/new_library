@@ -40,6 +40,19 @@ from telegram.ext import (
     MessageReactionHandler
 )
 
+from weekly_announcements import (
+    set_week_entry,
+    week_callback_handler,
+    receive_week_group_name,
+    receive_week_time_text,
+    receive_week_delete_text,
+    week_cancel,
+    WEEK_ROOT,
+    WEEK_WAITING_GROUP_NAME,
+    WEEK_WAITING_ADD_TIME,
+    WEEK_WAITING_DELETE_TIME,
+)
+
 import copy
 from flask import Flask
 import threading
@@ -6156,6 +6169,7 @@ def build_application():
     application.add_handler(CommandHandler("4", set_row_count), group=0)
     application.add_handler(CommandHandler("5", set_row_count), group=0)
     application.add_handler(CommandHandler("6", set_row_count), group=0)
+    application.add_handler(CommandHandler("set_week", set_week_entry), group=0)
     # در کنار هندلرهای سراسری دیگر در build_application
     application.add_handler(CommandHandler("style", set_custom_layout), group=0)
 
@@ -6177,7 +6191,10 @@ def build_application():
     )
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("set_week", set_week_entry),
+        ],
         states={
             CHOOSING: [
                 CommandHandler("report", report_page),
@@ -6271,6 +6288,25 @@ def build_application():
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_start_page_content)
             ],
 
+            WEEK_ROOT: [
+                CallbackQueryHandler(week_callback_handler, pattern=r"^week_"),
+            ],
+            
+            WEEK_WAITING_GROUP_NAME: [
+                CommandHandler("cancel", week_cancel),
+                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_group_name),
+            ],
+            
+            WEEK_WAITING_ADD_TIME: [
+                CommandHandler("cancel", week_cancel),
+                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_time_text),
+            ],
+            
+            WEEK_WAITING_DELETE_TIME: [
+                CommandHandler("cancel", week_cancel),
+                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_delete_text),
+            ],
+            
             WAITING_CHAT_MESSAGE: [
                 CommandHandler("cancel", cancel),
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_chat_message),
@@ -6282,6 +6318,7 @@ def build_application():
             CommandHandler("del", handle_reply_delete),
             CommandHandler("cansel", cancel_report),
             #CommandHandler("clear", clear_favorites_cmd),
+            CommandHandler("cancel", week_cancel),
         ],
         allow_reentry=True,
     )
