@@ -6193,7 +6193,7 @@ def build_application():
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            CommandHandler("set_week", set_week_entry),
+            #CommandHandler("set_week", set_week_entry),
         ],
         states={
             CHOOSING: [
