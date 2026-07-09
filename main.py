@@ -54,21 +54,6 @@ from telegram.ext import MessageReactionHandler
 from telegram import MessageReactionUpdated
 
 
-def delete_node_recursive(db, node_id):
-    # اگر نود وجود نداشت
-    if node_id not in db:
-        return
-
-    # اول بچه‌هاش رو حذف کن
-    children = db[node_id].get("children", [])
-    for child_id in children:
-        delete_node_recursive(db, child_id)
-
-    # بعد خود نود
-    del db[node_id]
-
-
-
 MAX_HISTORY = 20  # 🔹 بیرون تابع (بالای فایل)
 
 def push_admin_history(context, db):
@@ -497,7 +482,7 @@ def is_user_banned(user_id: int) -> bool:
     user_data = userdata.get("users", {}).get(str(user_id), {})
     return bool(user_data.get("banned", False))
 
-
+# ----- پنل ادمین --- مدیریت کاربران ----------------------
 def get_sorted_users_for_management(filter_mode="all"):
     """
     filter_mode:
@@ -688,31 +673,50 @@ async def set_custom_layout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     layout_by_indices = []
     used_indices = set()
     invalid_found = False
-
-    for line in lines[1:]: # از خط دوم به بعد
+    duplicate_found = False
+    
+    for line in lines[1:]:  # از خط دوم به بعد
         line = line.strip()
         if not line:
             continue
+    
         row_indices = []
         for num_str in line.split():
             try:
-                idx = int(num_str) - 1 # تبدیل به index (شروع از 0)
-                if 0 <= idx < len(children_ids):
-                    row_indices.append(idx)
-                    used_indices.add(idx)
-                else:
+                idx = int(num_str) - 1  # تبدیل به index (شروع از 0)
+    
+                if not (0 <= idx < len(children_ids)):
                     invalid_found = True
+                    continue
+    
+                # جلوگیری از تکراری بودن
+                if idx in used_indices:
+                    duplicate_found = True
+                    continue
+    
+                row_indices.append(idx)
+                used_indices.add(idx)
+    
             except ValueError:
                 invalid_found = True
+    
         if row_indices:
             layout_by_indices.append(row_indices)
-
+    
     if invalid_found:
         await update.message.reply_text(
             f"❌ برخی شماره‌ها نامعتبر بودند. تعداد کل دکمه‌های این پوشه {len(children_ids)} عدد است."
         )
         return
-
+    
+    if duplicate_found:
+        await update.message.reply_text(
+            "❌ بعضی شماره‌ها تکراری بودند.\n"
+            "هر دکمه فقط باید یک‌بار در چیدمان بیاید."
+        )
+        return
+    
+        
     # تبدیل ایندکس‌ها به IDهای واقعی پوشه‌ها
     new_layout = []
     for row in layout_by_indices:
@@ -924,9 +928,10 @@ async def set_node_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_pending_backup_caption(context, backup_caption)
     
     save_db(db, context=context)
-
+    
     parent_id = db[current_node_id].get("parent", "root")
     context.user_data["current_node"] = parent_id
+    set_report_page(context, parent_id)
 
     await update.message.reply_text(
         f"✅ رنگ این پوشه به «{new_color_name}» تغییر یافت.",
@@ -998,6 +1003,36 @@ def clear_all_favorites(user_id):
     if "favorites" in user_record:
         user_record["favorites"] = []
         save_userdata(userdata, upload=True) # ذخیره و آپلود نهایی
+
+def prune_invalid_favorites(user_id: int | str, userdata: dict, db: dict) -> list:
+    user_id = str(user_id)
+    user = userdata.setdefault("users", {}).setdefault(user_id, {})
+    favorites = user.get("favorites", [])
+
+    valid_favorites = []
+    changed = False
+
+    for fav in favorites:
+        node_id = fav.get("node_id")
+        content_index = fav.get("content_index")
+
+        node = db.get(node_id)
+        if not node:
+            changed = True
+            continue
+
+        contents = node.get("contents", [])
+        if not isinstance(content_index, int) or not (0 <= content_index < len(contents)):
+            changed = True
+            continue
+
+        valid_favorites.append(fav)
+
+    if changed:
+        user["favorites"] = valid_favorites
+        save_userdata(userdata)
+
+    return valid_favorites
 
 
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1704,7 +1739,7 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 "📝 متن گزارش را ارسال کنید.\n"
-                "اگر نمی‌خواهید متنی اضافه شود، دستور /no_messager را بزنید.\n"
+                "اگر نمی‌خواهید متنی اضافه شود، دستور /no_message را بزنید.\n"
                 "برای لغو کامل گزارش، دستور /cansel را بزنید."
             )
             return WAITING_REPORT_TEXT
@@ -1749,7 +1784,7 @@ async def report_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "📝 متن گزارش را ارسال کنید.\n"
-            "اگر نمی‌خواهید متنی اضافه شود، دستور /no_messager را بزنید.\n"
+            "اگر نمی‌خواهید متنی اضافه شود، دستور /no_message را بزنید.\n"
             "برای لغو کامل گزارش، دستور /cansel را بزنید."
         )
         return WAITING_REPORT_TEXT
@@ -2094,9 +2129,7 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
             msg_type = item.get("type")
             media_group_id = item.get("media_group_id")
 
-            # تلاش برای بازسازی آلبوم فقط وقتی:
-            # 1) media_group_id داشته باشیم
-            # 2) type از انواع groupable باشد
+            # فقط اگر media_group_id داشته باشد و type قابل گروپ باشد
             if media_group_id and msg_type in groupable_types:
                 group_items = []
                 group_indices = []
@@ -2116,63 +2149,84 @@ async def send_node_contents(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     else:
                         break
 
-                # اگر بیشتر از یک مورد پشت‌سرهم بود، به صورت media group بفرست
+                # اگر واقعاً گروه چندتایی بود
                 if len(group_items) > 1:
-                    media = []
-                    valid_group = True
-                
-                    # پیدا کردن اولین caption معتبر داخل گروه
-                    group_caption = None
-                    group_entities = None
-                
-                    for gi in group_items:
-                        cap = gi.get("caption")
-                        if cap:
-                            group_caption = cap
-                            group_entities = gi.get("entities")
-                            break
-                
-                    for idx2, group_item in enumerate(group_items):
-                        input_media = build_input_media(
-                            group_item,
-                            is_first=(idx2 == 0),
-                            forced_caption=group_caption if idx2 == 0 else None,
-                            forced_entities=group_entities if idx2 == 0 else None,
-                        )
-                        if input_media is None:
-                            valid_group = False
-                            break
-                        media.append(input_media)
-                
-                    if valid_group and media:
-                        try:
-                            sent_messages = await update.message.reply_media_group(media=media)
-                
-                            for sent, original_index in zip(sent_messages, group_indices):
-                                sent_mapping[sent.message_id] = {
-                                    "node_id": node_id,
-                                    "content_index": original_index,
-                                }
-                
-                            i = j
-                            continue
-                
-                        except Exception as group_error:
-                            logging.error(f"Error sending media group: {group_error}")
-                
-                            for group_item, original_index in zip(group_items, group_indices):
-                                try:
-                                    sent_msg = await send_single_content(update.message, group_item)
-                                    if sent_msg:
-                                        sent_mapping[sent_msg.message_id] = {
-                                            "node_id": node_id,
-                                            "content_index": original_index,
-                                        }
-                                except Exception as single_error:
-                                    logging.error(f"Fallback single send failed: {single_error}")
-                
-                            i = j
-                            continue
+                    # captionهای غیرخالی را پیدا کن
+                    captioned_items = [
+                        gi for gi in group_items
+                        if (gi.get("caption") or "").strip()
+                    ]
+
+                    # فقط 0 یا 1 caption => به صورت media_group
+                    if len(captioned_items) <= 1:
+                        media = []
+                        valid_group = True
+
+                        group_caption = None
+                        group_entities = None
+
+                        if captioned_items:
+                            group_caption = captioned_items[0].get("caption")
+                            group_entities = captioned_items[0].get("entities")
+
+                        for idx2, group_item in enumerate(group_items):
+                            input_media = build_input_media(
+                                group_item,
+                                is_first=(idx2 == 0),
+                                forced_caption=group_caption if idx2 == 0 else None,
+                                forced_entities=group_entities if idx2 == 0 else None,
+                            )
+                            if input_media is None:
+                                valid_group = False
+                                break
+                            media.append(input_media)
+
+                        if valid_group and media:
+                            try:
+                                sent_messages = await update.message.reply_media_group(media=media)
+
+                                for sent, original_index in zip(sent_messages, group_indices):
+                                    sent_mapping[sent.message_id] = {
+                                        "node_id": node_id,
+                                        "content_index": original_index,
+                                    }
+
+                                i = j
+                                continue
+
+                            except Exception as group_error:
+                                logging.error(f"Error sending media group: {group_error}")
+
+                                # fallback: ارسال تکی
+                                for group_item, original_index in zip(group_items, group_indices):
+                                    try:
+                                        sent_msg = await send_single_content(update.message, group_item)
+                                        if sent_msg:
+                                            sent_mapping[sent_msg.message_id] = {
+                                                "node_id": node_id,
+                                                "content_index": original_index,
+                                            }
+                                    except Exception as single_error:
+                                        logging.error(f"Fallback single send failed: {single_error}")
+
+                                i = j
+                                continue
+
+                    # اگر بیشتر از یک caption داشت => ارسال تکی‌تکی
+                    else:
+                        for group_item, original_index in zip(group_items, group_indices):
+                            try:
+                                sent_msg = await send_single_content(update.message, group_item)
+                                if sent_msg:
+                                    sent_mapping[sent_msg.message_id] = {
+                                        "node_id": node_id,
+                                        "content_index": original_index,
+                                    }
+                            except Exception as single_error:
+                                logging.error(f"Multi-caption single send failed: {single_error}")
+
+                        i = j
+                        continue
 
             # حالت عادی: ارسال تکی
             sent_msg = await send_single_content(update.message, item)
@@ -2805,7 +2859,7 @@ async def handle_smart_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     help_block = (
         "<blockquote>"
         "💡 برای تغییر حالت جستجو، از دستور /search_mode استفاده کنید.\n"
-        "💡 برای خاموش یا روشن کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
+        "💡 برای خاموش یا روشن‌کردن جستجوی هوشمند، از دستور /on_off_search استفاده کنید."
         "</blockquote>"
     )
 
@@ -4481,7 +4535,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "📁 پوشه دلخواه":
         userdata = load_userdata()
         users = userdata.get("users", {})
-        favorites = userdata.get("users", {}).get(str(user_id), {}).get("favorites", [])
+        favorites = prune_invalid_favorites(user_id, userdata, db)
         favorites_disabled = users.get(str(user_id), {}).get("favorites_disabled", False)
         if favorites_disabled:
             await update.message.reply_text("❌ شما پوشه دلخواه را غیرفعال کرده‌اید.\n\n⚙️ جهت فعال کردن آن، از دستور /on_off_favorite، استفاده کنید.")
@@ -5466,6 +5520,20 @@ async def show_reorder_keyboard(update, context, db):
     )
 
 
+# ------- حذف و اضافه دکمه/پوشه -------------
+def delete_node_recursive(db, node_id):
+    # اگر نود وجود نداشت
+    if node_id not in db:
+        return
+
+    # اول بچه‌هاش رو حذف کن
+    children = db[node_id].get("children", [])
+    for child_id in children:
+        delete_node_recursive(db, child_id)
+
+    # بعد خود نود
+    del db[node_id]
+
 async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "❌ لغو":
@@ -6149,7 +6217,7 @@ def build_application():
             ],
 
             WAITING_REPORT_TEXT: [
-                CommandHandler("no_messager", report_without_message),
+                CommandHandler("no_message", report_without_message),
                 CommandHandler("cansel", cancel_report),
                 MessageHandler(filters.TEXT & (~filters.COMMAND), receive_report_text),
             ],
