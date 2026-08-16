@@ -26,41 +26,80 @@ def get_style(node):
     )
 
 
-def get_layout(node):
-    """
-    چیدمان دکمه‌ها در هر ردیف.
-    می‌تونه عدد (مثلاً ۲) یا لیست (مثلاً [2, 1, 3]) باشه.
-    ⚠️ اینجا رو با فیلد دقیق خودت تنظیم کن.
-    """
-    for key in ("layout", "custom_layout", "rows", "row_count", "buttons_per_row"):
-        if key in node and node[key] is not None:
-            return node[key]
-    return None
-
-
 def chunk_children(children_ids, layout):
-    """تقسیم فرزندان به ردیف‌ها بر اساس چیدمان."""
+    """
+    تقسیم فرزندان به ردیف‌ها با پشتیبانی از همه فرمت‌های ممکن دیتابیس:
+    1. ماتریس مستقیم آی‌دی‌ها: [["id1", "id2"], ["id3"]]
+    2. لیست تعداد در هر ردیف: [2, 1, 3] یا [[2], [1]]
+    3. عدد ثابت: 2
+    4. پیش‌فرض: ۲ دکمه در هر ردیف
+    """
     if not children_ids:
         return []
 
-    if isinstance(layout, list):
-        rows = []
-        i = 0
-        for count in layout:
-            if i >= len(children_ids):
-                break
-            count = max(1, int(count))
-            rows.append(children_ids[i:i + count])
-            i += count
-        if i < len(children_ids):  # اگر آیتمی مونده بود
-            rows.append(children_ids[i:])
-        return rows
+    # حالت ۱: چیدمان از قبل یک لیست/ماتریس است
+    if isinstance(layout, list) and layout:
+        # اگر عناصر داخلی خودشون لیست هستند
+        if isinstance(layout[0], list):
+            # بررسی اینکه آیا ماتریسی از ID هاست یا ماتریسی از اعداد
+            # اگر شامل رشته/ID است، دقیقاً همان چیدمان را فیلتر و استفاده می‌کنیم
+            if any(isinstance(x, str) for x in layout[0]):
+                valid_ids = set(children_ids)
+                rows = []
+                for row in layout:
+                    filtered_row = [cid for cid in row if cid in valid_ids]
+                    if filtered_row:
+                        rows.append(filtered_row)
+                # اگر فرزندی جا مونده بود اضافه بشه
+                placed = {cid for row in rows for cid in row}
+                remaining = [cid for cid in children_ids if cid not in placed]
+                if remaining:
+                    rows.append(remaining)
+                return rows if rows else [children_ids]
 
+            # اگر لیستی از لیست‌های عددی بود مثلاً [[2], [1]]
+            layout_counts = []
+            for item in layout:
+                if isinstance(item, list) and item:
+                    try:
+                        layout_counts.append(int(item[0]))
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(item, (int, str)):
+                    try:
+                        layout_counts.append(int(item))
+                    except (ValueError, TypeError):
+                        pass
+            if layout_counts:
+                layout = layout_counts
+
+        # اگر لیست یک‌بعدی از اعداد باشد مثل [2, 1, 3]
+        if isinstance(layout, list) and layout and not isinstance(layout[0], list):
+            rows = []
+            i = 0
+            for count in layout:
+                if i >= len(children_ids):
+                    break
+                try:
+                    c = max(1, int(count))
+                except (ValueError, TypeError):
+                    c = 2
+                rows.append(children_ids[i:i + c])
+                i += c
+            if i < len(children_ids):
+                rows.append(children_ids[i:])
+            return rows
+
+    # حالت ۲: عدد صحیح یکتا (مثلاً ۲)
     if isinstance(layout, int):
         n = max(1, layout)
         return [children_ids[i:i + n] for i in range(0, len(children_ids), n)]
 
-    # پیش‌فرض: ۲ دکمه در هر ردیف
+    if isinstance(layout, str) and layout.isdigit():
+        n = max(1, int(layout))
+        return [children_ids[i:i + n] for i in range(0, len(children_ids), n)]
+
+    # حالت ۳: پیش‌فرض اگر هیچ چیدمانی تعریف نشده باشد (۲ دکمه در هر ردیف)
     return [children_ids[i:i + 2] for i in range(0, len(children_ids), 2)]
 
 
