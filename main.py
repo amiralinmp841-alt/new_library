@@ -25,7 +25,8 @@ from telegram import (
     InputMediaVideo,
     InputMediaDocument,
     InputMediaAudio,
-    MessageReactionUpdated
+    MessageReactionUpdated,
+    WebAppInfo
 )
 
 from telegram.ext import (
@@ -40,32 +41,6 @@ from telegram.ext import (
     MessageReactionHandler
 )
 
-from weekly_announcements import (
-    set_week_entry,
-    week_callback_handler,
-    receive_week_group_name,
-    receive_week_time_text,
-    receive_week_delete_text,
-    week_cancel,
-    get_week_alarm_entry,
-    user_week_callback_handler,
-    receive_week_alarm_days,
-    receive_week_alarm_time,
-    toggle_week_alarm,
-    WEEK_ROOT,
-    WEEK_WAITING_GROUP_NAME,
-    WEEK_WAITING_ADD_TIME,
-    WEEK_WAITING_DELETE_TIME,
-    WEEK_USER_ROOT,
-    WEEK_WAITING_ALARM_DAYS,
-    WEEK_WAITING_ALARM_TIME,
-    process_weekly_alarm_queue,
-    receive_week_backup_file,
-    WEEK_WAITING_BACKUP_FILE,
-    handle_week_backup_actions,
-)
-
-
 import copy
 from flask import Flask
 import threading
@@ -78,6 +53,21 @@ from smart_search import smart_search
 from html import escape
 from telegram.ext import MessageReactionHandler
 from telegram import MessageReactionUpdated
+from miniapp import get_node_json                  # فایل جدید
+
+def delete_node_recursive(db, node_id):
+    # اگر نود وجود نداشت
+    if node_id not in db:
+        return
+
+    # اول بچه‌هاش رو حذف کن
+    children = db[node_id].get("children", [])
+    for child_id in children:
+        delete_node_recursive(db, child_id)
+
+    # بعد خود نود
+    del db[node_id]
+
 
 
 MAX_HISTORY = 20  # 🔹 بیرون تابع (بالای فایل)
@@ -113,6 +103,8 @@ if os.getenv("ADMIN_IDS"):
 if not ADMIN_IDS:
     print("Error: ADMIN_IDS not set in environment variables.")
     exit(1)
+
+MINIAPP_URL = os.getenv("MINIAPP_URL", "https://YOUR-APP.onrender.com/miniapp")
 
 # فایل دیتابیس
 DB_FILE = "/tmp/database.json"
@@ -156,7 +148,6 @@ TG_SESSION_STRING = os.getenv("TG_SESSION_STRING")
 
 DB_BACKUP_CHAT_ID = int(os.getenv("DB_BACKUP_CHAT_ID", "0"))
 USERDATA_BACKUP_CHAT_ID = int(os.getenv("USERDATA_BACKUP_CHAT_ID", "0"))
-ALARM_GROUP_ID = int(os.getenv("ALARM_GROUP_ID", "0") or "0")
 
 ADMIN_ACCESSIBILITY_NAME = os.getenv("ADMIN_ACCESSIBILITY_NAME")
 
@@ -509,7 +500,7 @@ def is_user_banned(user_id: int) -> bool:
     user_data = userdata.get("users", {}).get(str(user_id), {})
     return bool(user_data.get("banned", False))
 
-# ----- پنل ادمین --- مدیریت کاربران ----------------------
+
 def get_sorted_users_for_management(filter_mode="all"):
     """
     filter_mode:
@@ -5547,20 +5538,6 @@ async def show_reorder_keyboard(update, context, db):
     )
 
 
-# ------- حذف و اضافه دکمه/پوشه -------------
-def delete_node_recursive(db, node_id):
-    # اگر نود وجود نداشت
-    if node_id not in db:
-        return
-
-    # اول بچه‌هاش رو حذف کن
-    children = db[node_id].get("children", [])
-    for child_id in children:
-        delete_node_recursive(db, child_id)
-
-    # بعد خود نود
-    del db[node_id]
-
 async def add_button_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "❌ لغو":
@@ -6051,6 +6028,17 @@ async def handle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         break
 
 
+async def miniapp_command(update, context):
+    btn = KeyboardButton(
+        text="📚 مشاهده کتابخانه",
+        web_app=WebAppInfo(url=MINIAPP_URL)
+    )
+    await update.message.reply_text(
+        "برای مرور کتابخانه روی دکمه‌ی زیر بزنید:",
+        reply_markup=ReplyKeyboardMarkup([[btn]], resize_keyboard=True)
+    )
+
+
 async def restore_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # لغو
     if update.message.text == "❌ لغو":
@@ -6183,9 +6171,8 @@ def build_application():
     application.add_handler(CommandHandler("4", set_row_count), group=0)
     application.add_handler(CommandHandler("5", set_row_count), group=0)
     application.add_handler(CommandHandler("6", set_row_count), group=0)
-    #application.add_handler(CommandHandler("set_week", set_week_entry), group=0)
-    # در کنار هندلرهای سراسری دیگر در build_application
     application.add_handler(CommandHandler("style", set_custom_layout), group=0)
+    application.add_handler(CommandHandler("miniapp", miniapp_command), group=0)
 
     
     application.add_handler(
@@ -6205,12 +6192,7 @@ def build_application():
     )
 
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("set_week", set_week_entry),
-            CommandHandler("alarm", toggle_week_alarm),
-            CommandHandler("get_week_alarm", get_week_alarm_entry),
-        ],
+        entry_points=[CommandHandler("start", start)],
         states={
             CHOOSING: [
                 CommandHandler("report", report_page),
@@ -6225,8 +6207,6 @@ def build_application():
 
                 CallbackQueryHandler(inline_handler, pattern="^reply_to_admin$"),
                 CallbackQueryHandler(inline_handler, pattern="^admin_"),
-                #CallbackQueryHandler(handle_week_backup_actions,pattern=r"^week_backup_(get|upload_prompt)$"),
-                
 
                 MessageHandler(filters.TEXT & (~filters.COMMAND), handle_navigation),
             ],
@@ -6306,52 +6286,6 @@ def build_application():
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_start_page_content)
             ],
 
-            WEEK_ROOT: [
-                CallbackQueryHandler(
-                    handle_week_backup_actions,
-                    pattern=r"^week_backup_(get|upload_prompt|cancel)$"
-                ),
-                CallbackQueryHandler(
-                    week_callback_handler,
-                    pattern=r"^week_"
-                ),
-            ],
-            
-            WEEK_WAITING_GROUP_NAME: [
-                CommandHandler("cancel", week_cancel),
-                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_group_name),
-            ],
-            
-            WEEK_WAITING_ADD_TIME: [
-                CommandHandler("cancel", week_cancel),
-                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_time_text),
-            ],
-            
-            WEEK_WAITING_DELETE_TIME: [
-                CommandHandler("cancel", week_cancel),
-                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_delete_text),
-            ],
-
-            WEEK_USER_ROOT: [
-                CallbackQueryHandler(user_week_callback_handler, pattern=r"^uweek_"),
-            ],
-
-            WEEK_WAITING_ALARM_DAYS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_week_alarm_days),
-            ],
-            WEEK_WAITING_ALARM_TIME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_week_alarm_time),
-            ],
-
-            WEEK_WAITING_BACKUP_FILE: [
-                CallbackQueryHandler(
-                    handle_week_backup_actions,
-                    pattern=r"^week_backup_cancel$"
-                ),
-                MessageHandler(filters.Document.ALL, receive_week_backup_file),
-                MessageHandler(filters.TEXT & (~filters.COMMAND), receive_week_backup_file),
-            ],
-            
             WAITING_CHAT_MESSAGE: [
                 CommandHandler("cancel", cancel),
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_chat_message),
@@ -6363,20 +6297,12 @@ def build_application():
             CommandHandler("del", handle_reply_delete),
             CommandHandler("cansel", cancel_report),
             #CommandHandler("clear", clear_favorites_cmd),
-            CommandHandler("cancel", week_cancel),
         ],
         allow_reentry=True,
     )
 
     application.add_handler(conv_handler, group=1)
 
-    application.job_queue.run_repeating(
-        process_weekly_alarm_queue,
-        interval=300,
-        first=10,
-        name="weekly_alarm_queue",
-    )
-    
     return application
 
 # ================= HEALTH & WEBHOOK =================
@@ -6423,6 +6349,18 @@ async def main():
     webapp.router.add_get("/", health)
     webapp.router.add_get("/health", health)
     webapp.router.add_post(f"/{TOKEN}", webhook_handler)
+
+    # ===== مینی‌اپ =====
+    static_html = os.path.join(os.path.dirname(__file__), "static", "miniapp.html")
+    webapp.router.add_get("/miniapp", lambda r: web.FileResponse(static_html))
+
+    async def miniapp_data_handler(request):
+        node_id = request.query.get("node", "root")
+        info = get_node_json(node_id)
+        return web.json_response(info or {"error": "node_not_found"})
+
+    webapp.router.add_get("/miniapp-data", miniapp_data_handler)
+    # ====================
 
     runner = web.AppRunner(webapp)
     await runner.setup()
