@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>کتابخانه مجازی</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Tahoma, "Segoe UI", sans-serif; }
+    body {
+      background: var(--tg-theme-bg-color, #f0f2f5);
+      color: var(--tg-theme-text-color, #1c1e21);
+      padding: 14px;
+      min-height: 100vh;
+    }
+
+    .header { text-align: center; margin: 8px 0 18px; }
+    .header h1 { font-size: 1.35rem; margin-bottom: 6px; }
+    .crumb { font-size: .8rem; color: var(--tg-hint-color, #888); line-height: 1.8; }
+    .crumb a { color: var(--tg-link-color, #2481cc); text-decoration: none; cursor: pointer; }
+
+    .content-box {
+      background: var(--tg-theme-secondary-bg-color, #ffffff);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 16px;
+      border: 1px solid var(--tg-hint-color, #ddd);
+    }
+    .content-box h3 { font-size: .95rem; margin-bottom: 8px; }
+    .text-item {
+      background: var(--tg-theme-bg-color, #f7f7f7);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: 4px 0;
+      font-size: .9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .stat {
+      display: inline-block;
+      background: var(--tg-hint-color, #eee);
+      color: var(--tg-theme-text-color, #333);
+      padding: 4px 10px;
+      border-radius: 8px;
+      margin: 3px;
+      font-size: .8rem;
+    }
+
+    .row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .row .btn { flex: 1; }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      border: none;
+      padding: 14px 14px;
+      border-radius: 12px;
+      color: #fff;
+      font-size: .95rem;
+      font-weight: 600;
+      text-align: right;
+      cursor: pointer;
+      transition: transform .08s ease, filter .1s ease;
+      min-height: 52px;
+    }
+    .btn:active { transform: scale(.97); filter: brightness(.92); }
+    .btn .arrow { opacity: .85; font-size: 1.1rem; }
+    .btn .count {
+      font-size: .7rem;
+      background: rgba(0,0,0,.2);
+      border-radius: 20px;
+      padding: 2px 8px;
+      font-weight: 400;
+    }
+
+    /* رنگ‌ها مطابق استایل‌های ربات */
+    .green { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+    .blue  { background: linear-gradient(135deg, #3498db, #2980b9); }
+    .red   { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+    .none  { background: var(--tg-theme-button-color, #2481cc); }
+
+    .footer {
+      display: flex;
+      gap: 10px;
+      margin-top: 22px;
+    }
+    .footer button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      font-size: .95rem;
+      cursor: pointer;
+      background: var(--tg-theme-secondary-bg-color, #fff);
+      color: var(--tg-theme-text-color, #222);
+      border: 1px solid var(--tg-hint-color, #ddd);
+    }
+
+    .empty { color: var(--tg-hint-color, #999); text-align: center; padding: 24px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1 id="title">📚 کتابخانه</h1>
+    <div class="crumb" id="crumb"></div>
+  </div>
+
+  <div id="content"></div>
+  <div id="buttons"></div>
+  <p id="empty" class="empty" style="display:none;">این پوشه خالی است.</p>
+
+  <div class="footer">
+    <button onclick="goBack()">🔙 بازگشت</button>
+    <button onclick="goTo('root')">🏠 خانه</button>
+  </div>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  if (tg) { tg.ready(); tg.expand(); }
+
+  const historyStack = [];
+
+  async function fetchNode(nodeId) {
+    const res = await fetch('/miniapp-data?node=' + encodeURIComponent(nodeId));
+    return res.json();
+  }
+
+  function applyStyle(el, style) {
+    if (style && style.startsWith('#')) {   // رنگ هگز دلخواه
+      el.style.background = style;
+      return;
+    }
+    el.classList.add(style || 'none');
+  }
+
+  function renderCrumb(node) {
+    const crumb = document.getElementById('crumb');
+    crumb.innerHTML = '';
+    (node.breadcrumb || []).forEach((b, i) => {
+      const a = document.createElement('a');
+      a.textContent = b.name;
+      a.onclick = () => goTo(b.id);
+      crumb.appendChild(a);
+      if (i < (node.breadcrumb.length - 1)) {
+        crumb.appendChild(document.createTextNode(' › '));
+      }
+    });
+  }
+
+  function renderContents(contents) {
+    const div = document.getElementById('content');
+    div.innerHTML = '';
+
+    const texts = contents?.texts || [];
+    const media = contents?.media || {};
+
+    if (!texts.length && !Object.keys(media).length) return;
+
+    const box = document.createElement('div');
+    box.className = 'content-box';
+
+    if (texts.length) {
+      box.innerHTML += '<h3>📄 متن</h3>';
+      texts.forEach(t => {
+        const p = document.createElement('div');
+        p.className = 'text-item';
+        p.textContent = t;
+        box.appendChild(p);
+      });
+    }
+
+    const labels = {
+      photo: '📷 عکس', video: '🎬 ویدیو', document: '📁 فایل',
+      audio: '🎵 صدا', voice: '🎤 ویس', animation: '✨ گیف',
+      sticker: '🏷 استیکر', video_note: '⭕️ ویدیو مسیج'
+    };
+
+    const mediaEntries = Object.entries(media);
+    if (mediaEntries.length) {
+      box.innerHTML += '<h3>📎 فایل‌ها</h3>';
+      mediaEntries.forEach(([k, v]) => {
+        const s = document.createElement('span');
+        s.className = 'stat';
+        s.textContent = `${labels[k] || k}: ${v}`;
+        box.appendChild(s);
+      });
+    }
+
+    div.appendChild(box);
+  }
+
+  function renderButtons(node) {
+    const div = document.getElementById('buttons');
+    div.innerHTML = '';
+
+    (node.rows || []).forEach(rowChildren => {
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      rowChildren.forEach(c => {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        applyStyle(b, c.style);
+
+        let inner = `<span>${c.name}</span>`;
+        if (c.content_count) {
+          inner += `<span class="count">${c.content_count} 📎</span>`;
+        } else if (c.has_children) {
+          inner += `<span class="arrow">▸</span>`;
+        }
+        b.innerHTML = inner;
+
+        b.onclick = () => {
+          historyStack.push(node.id);
+          render(c.id);
+        };
+        row.appendChild(b);
+      });
+
+      div.appendChild(row);
+    });
+
+    document.getElementById('empty').style.display =
+      (node.rows && node.rows.length) ? 'none' : 'block';
+  }
+
+  async function render(nodeId) {
+    const node = await fetchNode(nodeId);
+    if (!node || node.error) {
+      document.getElementById('empty').style.display = 'block';
+      return;
+    }
+    document.getElementById('title').textContent = node.name;
+    renderCrumb(node);
+    renderContents(node.contents);
+    renderButtons(node);
+    window.scrollTo(0, 0);
+  }
+
+  function goBack() {
+    const prev = historyStack.pop();
+    render(prev || 'root');
+  }
+
+  function goTo(id) {
+    historyStack.length = 0;
+    render(id);
+  }
+
+  render('root');
+</script>
+</body>
+</html>
