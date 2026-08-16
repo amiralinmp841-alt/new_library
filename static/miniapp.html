@@ -1,256 +1,178 @@
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>کتابخانه مجازی</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Tahoma, "Segoe UI", sans-serif; }
-    body {
-      background: var(--tg-theme-bg-color, #f0f2f5);
-      color: var(--tg-theme-text-color, #1c1e21);
-      padding: 14px;
-      min-height: 100vh;
-    }
+import json
+import os
 
-    .header { text-align: center; margin: 8px 0 18px; }
-    .header h1 { font-size: 1.35rem; margin-bottom: 6px; }
-    .crumb { font-size: .8rem; color: var(--tg-hint-color, #888); line-height: 1.8; }
-    .crumb a { color: var(--tg-link-color, #2481cc); text-decoration: none; cursor: pointer; }
+# همون مسیر دیتابیس اصلی ربات
+DB_FILE = os.getenv("DB_FILE", "/tmp/database.json")
 
-    .content-box {
-      background: var(--tg-theme-secondary-bg-color, #ffffff);
-      border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 16px;
-      border: 1px solid var(--tg-hint-color, #ddd);
-    }
-    .content-box h3 { font-size: .95rem; margin-bottom: 8px; }
-    .text-item {
-      background: var(--tg-theme-bg-color, #f7f7f7);
-      border-radius: 8px;
-      padding: 8px 10px;
-      margin: 4px 0;
-      font-size: .9rem;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .stat {
-      display: inline-block;
-      background: var(--tg-hint-color, #eee);
-      color: var(--tg-theme-text-color, #333);
-      padding: 4px 10px;
-      border-radius: 8px;
-      margin: 3px;
-      font-size: .8rem;
-    }
 
-    .row { display: flex; gap: 8px; margin-bottom: 8px; }
-    .row .btn { flex: 1; }
+def load_db():
+    try:
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-    .btn {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-      border: none;
-      padding: 14px 14px;
-      border-radius: 12px;
-      color: #fff;
-      font-size: .95rem;
-      font-weight: 600;
-      text-align: right;
-      cursor: pointer;
-      transition: transform .08s ease, filter .1s ease;
-      min-height: 52px;
-    }
-    .btn:active { transform: scale(.97); filter: brightness(.92); }
-    .btn .arrow { opacity: .85; font-size: 1.1rem; }
-    .btn .count {
-      font-size: .7rem;
-      background: rgba(0,0,0,.2);
-      border-radius: 20px;
-      padding: 2px 8px;
-      font-weight: 400;
-    }
 
-    /* رنگ‌ها مطابق استایل‌های ربات */
-    .green { background: linear-gradient(135deg, #2ecc71, #27ae60); }
-    .blue  { background: linear-gradient(135deg, #3498db, #2980b9); }
-    .red   { background: linear-gradient(135deg, #e74c3c, #c0392b); }
-    .none  { background: var(--tg-theme-button-color, #2481cc); }
+def get_style(node):
+    """
+    رنگ پوشه. چون اسم دقیق فیلد رو مطمئن نیستم، چند حالت رو چک می‌کنه.
+    ⚠️ اینجا رو بعداً با فیلد دقیق توی دیتابیس خودت جایگزین کن.
+    """
+    return (
+        node.get("color")
+        or node.get("style")
+        or node.get("node_style")
+        or "none"
+    )
 
-    .footer {
-      display: flex;
-      gap: 10px;
-      margin-top: 22px;
-    }
-    .footer button {
-      flex: 1;
-      padding: 12px;
-      border: none;
-      border-radius: 10px;
-      font-size: .95rem;
-      cursor: pointer;
-      background: var(--tg-theme-secondary-bg-color, #fff);
-      color: var(--tg-theme-text-color, #222);
-      border: 1px solid var(--tg-hint-color, #ddd);
-    }
 
-    .empty { color: var(--tg-hint-color, #999); text-align: center; padding: 24px; }
-  </style>
-</head>
-<body>
+def chunk_children(children_ids, layout):
+    """
+    تقسیم فرزندان به ردیف‌ها با پشتیبانی از همه فرمت‌های ممکن دیتابیس:
+    1. ماتریس مستقیم آی‌دی‌ها: [["id1", "id2"], ["id3"]]
+    2. لیست تعداد در هر ردیف: [2, 1, 3] یا [[2], [1]]
+    3. عدد ثابت: 2
+    4. پیش‌فرض: ۲ دکمه در هر ردیف
+    """
+    if not children_ids:
+        return []
 
-  <div class="header">
-    <h1 id="title">📚 کتابخانه</h1>
-    <div class="crumb" id="crumb"></div>
-  </div>
+    # حالت ۱: چیدمان از قبل یک لیست/ماتریس است
+    if isinstance(layout, list) and layout:
+        # اگر عناصر داخلی خودشون لیست هستند
+        if isinstance(layout[0], list):
+            # بررسی اینکه آیا ماتریسی از ID هاست یا ماتریسی از اعداد
+            # اگر شامل رشته/ID است، دقیقاً همان چیدمان را فیلتر و استفاده می‌کنیم
+            if any(isinstance(x, str) for x in layout[0]):
+                valid_ids = set(children_ids)
+                rows = []
+                for row in layout:
+                    filtered_row = [cid for cid in row if cid in valid_ids]
+                    if filtered_row:
+                        rows.append(filtered_row)
+                # اگر فرزندی جا مونده بود اضافه بشه
+                placed = {cid for row in rows for cid in row}
+                remaining = [cid for cid in children_ids if cid not in placed]
+                if remaining:
+                    rows.append(remaining)
+                return rows if rows else [children_ids]
 
-  <div id="content"></div>
-  <div id="buttons"></div>
-  <p id="empty" class="empty" style="display:none;">این پوشه خالی است.</p>
+            # اگر لیستی از لیست‌های عددی بود مثلاً [[2], [1]]
+            layout_counts = []
+            for item in layout:
+                if isinstance(item, list) and item:
+                    try:
+                        layout_counts.append(int(item[0]))
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(item, (int, str)):
+                    try:
+                        layout_counts.append(int(item))
+                    except (ValueError, TypeError):
+                        pass
+            if layout_counts:
+                layout = layout_counts
 
-  <div class="footer">
-    <button onclick="goBack()">🔙 بازگشت</button>
-    <button onclick="goTo('root')">🏠 خانه</button>
-  </div>
+        # اگر لیست یک‌بعدی از اعداد باشد مثل [2, 1, 3]
+        if isinstance(layout, list) and layout and not isinstance(layout[0], list):
+            rows = []
+            i = 0
+            for count in layout:
+                if i >= len(children_ids):
+                    break
+                try:
+                    c = max(1, int(count))
+                except (ValueError, TypeError):
+                    c = 2
+                rows.append(children_ids[i:i + c])
+                i += c
+            if i < len(children_ids):
+                rows.append(children_ids[i:])
+            return rows
 
-<script>
-  const tg = window.Telegram?.WebApp;
-  if (tg) { tg.ready(); tg.expand(); }
+    # حالت ۲: عدد صحیح یکتا (مثلاً ۲)
+    if isinstance(layout, int):
+        n = max(1, layout)
+        return [children_ids[i:i + n] for i in range(0, len(children_ids), n)]
 
-  const historyStack = [];
+    if isinstance(layout, str) and layout.isdigit():
+        n = max(1, int(layout))
+        return [children_ids[i:i + n] for i in range(0, len(children_ids), n)]
 
-  async function fetchNode(nodeId) {
-    const res = await fetch('/miniapp-data?node=' + encodeURIComponent(nodeId));
-    return res.json();
-  }
+    # حالت ۳: پیش‌فرض اگر هیچ چیدمانی تعریف نشده باشد (۲ دکمه در هر ردیف)
+    return [children_ids[i:i + 2] for i in range(0, len(children_ids), 2)]
 
-  function applyStyle(el, style) {
-    if (style && style.startsWith('#')) {   // رنگ هگز دلخواه
-      el.style.background = style;
-      return;
-    }
-    el.classList.add(style || 'none');
-  }
 
-  function renderCrumb(node) {
-    const crumb = document.getElementById('crumb');
-    crumb.innerHTML = '';
-    (node.breadcrumb || []).forEach((b, i) => {
-      const a = document.createElement('a');
-      a.textContent = b.name;
-      a.onclick = () => goTo(b.id);
-      crumb.appendChild(a);
-      if (i < (node.breadcrumb.length - 1)) {
-        crumb.appendChild(document.createTextNode(' › '));
-      }
-    });
-  }
+def serialize_contents(contents):
+    """
+    متن‌ها رو مستقیم برمی‌گردونه (چون قابل نمایش هستن)
+    و فایل‌ها (عکس/ویدیو/PDF) رو فقط به صورت تعداد خلاصه می‌کنه.
+    """
+    texts = []
+    media_counts = {}
 
-  function renderContents(contents) {
-    const div = document.getElementById('content');
-    div.innerHTML = '';
+    for c in contents:
+        t = c.get("type")
+        if t == "text":
+            texts.append(c.get("text", ""))
+        else:
+            media_counts[t] = media_counts.get(t, 0) + 1
 
-    const texts = contents?.texts || [];
-    const media = contents?.media || {};
+    return {"texts": texts, "media": media_counts}
 
-    if (!texts.length && !Object.keys(media).length) return;
 
-    const box = document.createElement('div');
-    box.className = 'content-box';
+def get_breadcrumb(db, node_id):
+    """مسیر کامل از روت تا نود فعلی."""
+    path = []
+    cur = node_id
+    while cur:
+        node = db.get(cur)
+        if not node:
+            break
+        path.append({"id": cur, "name": node.get("name", "بدون نام")})
+        cur = node.get("parent")
+    path.reverse()
+    return path
 
-    if (texts.length) {
-      box.innerHTML += '<h3>📄 متن</h3>';
-      texts.forEach(t => {
-        const p = document.createElement('div');
-        p.className = 'text-item';
-        p.textContent = t;
-        box.appendChild(p);
-      });
-    }
 
-    const labels = {
-      photo: '📷 عکس', video: '🎬 ویدیو', document: '📁 فایل',
-      audio: '🎵 صدا', voice: '🎤 ویس', animation: '✨ گیف',
-      sticker: '🏷 استیکر', video_note: '⭕️ ویدیو مسیج'
-    };
+def serialize_node(db, node_id):
+    node = db.get(node_id)
+    if not node:
+        return None
 
-    const mediaEntries = Object.entries(media);
-    if (mediaEntries.length) {
-      box.innerHTML += '<h3>📎 فایل‌ها</h3>';
-      mediaEntries.forEach(([k, v]) => {
-        const s = document.createElement('span');
-        s.className = 'stat';
-        s.textContent = `${labels[k] || k}: ${v}`;
-        box.appendChild(s);
-      });
-    }
+    children_ids = node.get("children", [])
 
-    div.appendChild(box);
-  }
-
-  function renderButtons(node) {
-    const div = document.getElementById('buttons');
-    div.innerHTML = '';
-
-    (node.rows || []).forEach(rowChildren => {
-      const row = document.createElement('div');
-      row.className = 'row';
-
-      rowChildren.forEach(c => {
-        const b = document.createElement('button');
-        b.className = 'btn';
-        applyStyle(b, c.style);
-
-        let inner = `<span>${c.name}</span>`;
-        if (c.content_count) {
-          inner += `<span class="count">${c.content_count} 📎</span>`;
-        } else if (c.has_children) {
-          inner += `<span class="arrow">▸</span>`;
+    def to_child(cid):
+        child = db.get(cid)
+        if not child:
+            return None
+        return {
+            "id": cid,
+            "name": child.get("name", "بدون نام"),
+            "style": get_style(child),
+            "has_children": bool(child.get("children")),
+            "content_count": len(child.get("contents", [])),
         }
-        b.innerHTML = inner;
 
-        b.onclick = () => {
-          historyStack.push(node.id);
-          render(c.id);
-        };
-        row.appendChild(b);
-      });
+    # چیدمان ردیف‌ها
+    rows_ids = chunk_children(children_ids, get_layout(node))
+    rows = []
+    for row_ids in rows_ids:
+        row = [to_child(cid) for cid in row_ids]
+        row = [r for r in row if r is not None]
+        if row:
+            rows.append(row)
 
-      div.appendChild(row);
-    });
-
-    document.getElementById('empty').style.display =
-      (node.rows && node.rows.length) ? 'none' : 'block';
-  }
-
-  async function render(nodeId) {
-    const node = await fetchNode(nodeId);
-    if (!node || node.error) {
-      document.getElementById('empty').style.display = 'block';
-      return;
+    return {
+        "id": node_id,
+        "name": node.get("name", "بدون نام"),
+        "parent": node.get("parent"),
+        "style": get_style(node),
+        "contents": serialize_contents(node.get("contents", [])),
+        "rows": rows,                              # دکمه‌ها به تفکیک ردیف
+        "breadcrumb": get_breadcrumb(db, node_id),
     }
-    document.getElementById('title').textContent = node.name;
-    renderCrumb(node);
-    renderContents(node.contents);
-    renderButtons(node);
-    window.scrollTo(0, 0);
-  }
 
-  function goBack() {
-    const prev = historyStack.pop();
-    render(prev || 'root');
-  }
 
-  function goTo(id) {
-    historyStack.length = 0;
-    render(id);
-  }
-
-  render('root');
-</script>
-</body>
-</html>
+def get_node_json(node_id="root"):
+    return serialize_node(load_db(), node_id)
