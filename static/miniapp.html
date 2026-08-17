@@ -970,47 +970,144 @@
         // =====================================================
         // VIDEO
         // =====================================================
-    
+        
         if (type === "video") {
-    
+        
+          const title = document.createElement("div");
+          title.className = "file-title";
+        
+          title.textContent =
+            "🎬 " +
+            (filename || "ویدیو");
+        
+          itemDiv.appendChild(title);
+        
+        
+          // -----------------------------
+          // ویدیو
+          // -----------------------------
+        
+          const videoWrapper =
+            document.createElement("div");
+        
+          videoWrapper.style.position = "relative";
+          videoWrapper.style.width = "100%";
+          videoWrapper.style.marginTop = "8px";
+        
+        
           const video =
             document.createElement("video");
-    
+        
           video.src = fileUrl;
-    
+        
           video.controls = true;
-    
+        
           video.playsInline = true;
-    
+        
+          // مهم:
+          // مرورگر خودش فقط بخش‌های لازم را درخواست می‌کند
           video.preload = "metadata";
-    
+        
           video.style.width = "100%";
           video.style.maxHeight = "500px";
           video.style.borderRadius = "10px";
-    
-          itemDiv.appendChild(video);
-    
-    
+          video.style.display = "block";
+          video.style.background = "#000";
+        
+        
+          videoWrapper.appendChild(video);
+        
+          itemDiv.appendChild(videoWrapper);
+        
+        
+          // -----------------------------
+          // دکمه‌ها
+          // -----------------------------
+        
+          const buttons =
+            document.createElement("div");
+        
+          buttons.style.display = "flex";
+          buttons.style.gap = "8px";
+          buttons.style.marginTop = "10px";
+        
+        
+          // مشاهده
+          const watchButton =
+            document.createElement("a");
+        
+          watchButton.href = fileUrl;
+        
+          watchButton.target = "_blank";
+        
+          watchButton.textContent =
+            "🎬 مشاهده ویدیو";
+        
+          watchButton.style.flex = "1";
+          watchButton.style.display = "block";
+          watchButton.style.textAlign = "center";
+          watchButton.style.padding = "10px";
+          watchButton.style.borderRadius = "8px";
+          watchButton.style.background =
+            "var(--tg-theme-button-color, #2481cc)";
+          watchButton.style.color = "white";
+          watchButton.style.textDecoration = "none";
+        
+        
+          // دانلود
+          const downloadButton =
+            document.createElement("a");
+        
+          downloadButton.href = fileUrl;
+        
+          downloadButton.download =
+            filename || "video.mp4";
+        
+          downloadButton.textContent =
+            "⬇️ دانلود";
+        
+          downloadButton.style.flex = "1";
+          downloadButton.style.display = "block";
+          downloadButton.style.textAlign = "center";
+          downloadButton.style.padding = "10px";
+          downloadButton.style.borderRadius = "8px";
+          downloadButton.style.background =
+            "var(--tg-theme-secondary-bg-color, #eee)";
+          downloadButton.style.color =
+            "var(--tg-theme-text-color, #222)";
+          downloadButton.style.textDecoration = "none";
+        
+        
+          buttons.appendChild(watchButton);
+          buttons.appendChild(downloadButton);
+        
+          itemDiv.appendChild(buttons);
+        
+        
+          // -----------------------------
+          // کپشن
+          // -----------------------------
+        
           if (item.caption) {
-    
+        
             const caption =
               document.createElement("div");
-    
+        
             caption.className =
               "file-caption";
-    
+        
             caption.textContent =
               item.caption;
-    
+        
             itemDiv.appendChild(caption);
           }
-    
-    
+        
+        
           box.appendChild(itemDiv);
-    
+        
           return;
         }
-    
+            
     
         // =====================================================
         // AUDIO
