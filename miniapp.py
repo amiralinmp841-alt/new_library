@@ -58,17 +58,35 @@ def get_rows(node):
     return [children_ids[i:i+n] for i in range(0, len(children_ids), n)]
 
 def serialize_contents(contents):
-    texts = []
-    media_counts = {}
-    for c in contents or []:
-        if not isinstance(c, dict):
+    result = []
+
+    for item in contents or []:
+        if not isinstance(item, dict):
             continue
-        t = c.get("type")
-        if t == "text":
-            texts.append(c.get("text", ""))
-        elif t:
-            media_counts[t] = media_counts.get(t, 0) + 1
-    return {"texts": texts, "media": media_counts}
+
+        content_type = item.get("type", "unknown")
+
+        # متن
+        if content_type == "text":
+            result.append({
+                "type": "text",
+                "text": item.get("text", "")
+            })
+            continue
+
+        # مدیا و فایل‌ها
+        result.append({
+            "type": content_type,
+            "caption": item.get("caption", ""),
+            "file_name": (
+                item.get("file_name")
+                or item.get("filename")
+                or item.get("document_name")
+                or ""
+            )
+        })
+
+    return result
 
 def get_breadcrumb(db, node_id):
     path = []
