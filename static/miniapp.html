@@ -1230,63 +1230,32 @@
 
     }
 
-
     /* =========================================================
-       اعمال رنگ دکمه
-       منطق اصلی حفظ شده؛ فقط خوانایی رنگ سفارشی بهتر شده است.
+       اعمال رنگ دکمه (اصلاح شده برای متن همیشه سیاه)
        ========================================================= */
-
+    
     function applyStyle(element, style) {
-
+      // همیشه متن دکمه‌ها را مشکی تنظیم می‌کنیم
+      const forceTextColor = "#000000"; 
+      element.style.color = forceTextColor;
+    
       if (!style || style === "none") {
-
         element.classList.add("none");
-
         return;
       }
-
-
-      if (
-        typeof style === "string" &&
-        style.startsWith("#")
-      ) {
-
-        const textColor =
-          getContrastTextColor(style);
-
-        element.style.background =
-          `linear-gradient(
-            135deg,
-            ${style},
-            ${style}
-          )`;
-
-        element.style.color =
-          textColor;
-
-        element.style.textShadow =
-          textColor === "#ffffff"
-            ? "0 2px 7px rgba(0, 0, 0, 0.34)"
-            : "none";
-
+    
+      if (typeof style === "string" && style.startsWith("#")) {
+        element.style.background = `linear-gradient(135deg, ${style}, ${style})`;
+        // در اینجا دیگر تابع getContrastTextColor را صدا نمی‌زنیم 
+        // و مستقیماً همان رنگ مشکی که بالا تعریف کردیم را اعمال می‌کنیم
+        element.style.textShadow = "none"; 
         return;
       }
-
-
-      const safeClass =
-        String(style)
-          .replace(
-            /[^a-zA-Z0-9_-]/g,
-            ""
-          );
-
-
-      element.classList.add(
-        safeClass || "none"
-      );
-
+    
+      const safeClass = String(style).replace(/[^a-zA-Z0-9_-]/g, "");
+      element.classList.add(safeClass || "none");
     }
-
+    
 
     /* =========================================================
        دکمه‌های ناوبری
