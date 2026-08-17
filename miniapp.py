@@ -1,50 +1,113 @@
 import json
 import os
 from aiohttp import web
-
+import mimetypes
 
 DB_FILE = "/tmp/database.json"
 
 
 def load_db():
-    """
-    دیتابیس را از فایل محلی می‌خواند.
-    """
+    print("========== MINIAPP DB DEBUG ==========")
+    print("DB_FILE:", DB_FILE)
+    print("Current directory:", os.getcwd())
+    print("File exists:", os.path.exists(DB_FILE))
 
-    if not os.path.exists(DB_FILE):
-        print(
-            f"⚠️ Mini App DB not found: {DB_FILE}"
-        )
+    if os.path.exists(DB_FILE):
+        try:
+            print("File size:", os.path.getsize(DB_FILE))
 
-        return {}
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-    try:
+            print("DB type:", type(data))
+            print("DB keys:", len(data) if isinstance(data, dict) else "NOT DICT")
 
-        with open(
-            DB_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
+            if isinstance(data, dict):
+                print("First keys:", list(data.keys())[:10])
 
-            data = json.load(f)
+            print("======================================")
 
-        if not isinstance(data, dict):
-            print(
-                "⚠️ Mini App DB is not a dictionary."
-            )
+            return data if isinstance(data, dict) else {}
 
+        except Exception as e:
+            print("❌ DB READ ERROR:", repr(e))
+            print("======================================")
             return {}
 
-        return data
+    print("❌ DATABASE FILE DOES NOT EXIST")
+    print("======================================")
+
+    return {}
+
+async def miniapp_file(request):
+
+    file_id = request.query.get("file_id")
+
+    if not file_id:
+        return web.Response(
+            text="file_id مشخص نشده",
+            status=400
+        )
+
+    try:
+        # -------------------------------------------------
+        # گرفتن Bot از application
+        # -------------------------------------------------
+
+        bot = request.app["bot"]
+
+        # -------------------------------------------------
+        # گرفتن اطلاعات فایل از تلگرام
+        # -------------------------------------------------
+
+        telegram_file = await bot.get_file(file_id)
+
+        # -------------------------------------------------
+        # دانلود فایل
+        # -------------------------------------------------
+
+        file_data = await telegram_file.download_as_bytearray()
+
+        # -------------------------------------------------
+        # تشخیص MIME
+        # -------------------------------------------------
+
+        filename = (
+            request.query.get("filename")
+            or ""
+        )
+
+        mime_type = (
+            request.query.get("mime")
+            or mimetypes.guess_type(filename)[0]
+            or "application/octet-stream"
+        )
+
+        # -------------------------------------------------
+        # ارسال فایل به مرورگر
+        # -------------------------------------------------
+
+        return web.Response(
+            body=bytes(file_data),
+            content_type=mime_type,
+            headers={
+                "Content-Disposition":
+                    f'inline; filename="{filename}"'
+            }
+        )
 
     except Exception as e:
 
         print(
-            "❌ Mini App failed to load DB:",
+            "❌ Mini App file error:",
             repr(e)
         )
 
-        return {}
+        return web.Response(
+            text="خطا در دریافت فایل",
+            status=500
+        )
+
 
 def get_style(node):
     raw_style = (
