@@ -815,113 +815,533 @@
        ========================================================= */
 
     function renderContents(contents) {
-
-      const contentDiv =
-        document.getElementById(
-          "content"
-        );
-
-
+    
+      const contentDiv = document.getElementById("content");
       contentDiv.innerHTML = "";
-
-
-      if (
-        !Array.isArray(contents) ||
-        contents.length === 0
-      ) {
-
+    
+      if (!Array.isArray(contents) || contents.length === 0) {
         return;
-
       }
-
-
-      const box =
-        document.createElement("div");
-
-
-      box.className =
-        "content-box";
-
-
-      const heading =
-        document.createElement("h3");
-
-
-      heading.textContent =
-        "📂 محتوای این بخش";
-
-
-      box.appendChild(
-        heading
-      );
-
-
-      contents.forEach(
-        (item) => {
-
-          if (
-            !item ||
-            typeof item !== "object"
-          ) {
-
-            return;
-
-          }
-
-
-          /* ---------- متن ---------- */
-
-          if (
-            item.type === "text"
-          ) {
-
-            const textDiv =
-              document.createElement(
-                "div"
-              );
-
-
-            textDiv.className =
-              "text-item";
-
-
-            textDiv.textContent =
-              item.text ||
-              item.content ||
-              "";
-
-
-            box.appendChild(
-              textDiv
-            );
-
-
-            return;
-
-          }
-
-
-          /* ---------- فایل ---------- */
-
-          const fileItem =
-            createFileItem(item);
-
-
-          box.appendChild(
-            fileItem
-          );
-
+    
+      const box = document.createElement("div");
+      box.className = "content-box";
+    
+      const heading = document.createElement("h3");
+      heading.textContent = "📂 محتوای این بخش";
+      box.appendChild(heading);
+    
+    
+      contents.forEach((item) => {
+    
+        if (!item || typeof item !== "object") {
+          return;
         }
-      );
-
-
-      contentDiv.appendChild(
-        box
-      );
-
+    
+        const type = item.type || "unknown";
+    
+        /* =====================================================
+           TEXT
+           ===================================================== */
+    
+        if (type === "text") {
+    
+          const textDiv = document.createElement("div");
+          textDiv.className = "text-item";
+    
+          textDiv.textContent =
+            item.text ||
+            item.content ||
+            "";
+    
+          box.appendChild(textDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           PHOTO
+           ===================================================== */
+    
+        if (type === "photo") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent =
+            "📷 " +
+            (
+              item.file_name ||
+              "عکس"
+            );
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.caption) {
+    
+            const caption = document.createElement("div");
+            caption.className = "file-caption";
+    
+            caption.textContent = item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+    
+          /*
+           * فعلاً file_id را نشان می‌دهیم.
+           * برای نمایش خود عکس باید endpoint فایل
+           * تلگرام را به Mini App اضافه کنیم.
+           */
+    
+          if (item.file_id) {
+    
+            const info = document.createElement("div");
+            info.className = "file-type";
+    
+            info.textContent =
+              "📎 فایل دریافت شد";
+    
+            itemDiv.appendChild(info);
+          }
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           VIDEO
+           ===================================================== */
+    
+        if (type === "video") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent =
+            "🎬 " +
+            (
+              item.file_name ||
+              "ویدئو"
+            );
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.caption) {
+    
+            const caption = document.createElement("div");
+            caption.className = "file-caption";
+    
+            caption.textContent =
+              item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           DOCUMENT
+           ===================================================== */
+    
+        if (type === "document") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent =
+            "📄 " +
+            (
+              item.file_name ||
+              "سند"
+            );
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.caption) {
+    
+            const caption = document.createElement("div");
+            caption.className = "file-caption";
+    
+            caption.textContent =
+              item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           AUDIO
+           ===================================================== */
+    
+        if (type === "audio") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent =
+            "🎵 " +
+            (
+              item.file_name ||
+              "فایل صوتی"
+            );
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.caption) {
+    
+            const caption = document.createElement("div");
+            caption.className = "file-caption";
+    
+            caption.textContent =
+              item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           VOICE
+           ===================================================== */
+    
+        if (type === "voice") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent = "🎤 پیام صوتی";
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.caption) {
+    
+            const caption = document.createElement("div");
+            caption.className = "file-caption";
+    
+            caption.textContent =
+              item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           ANIMATION
+           ===================================================== */
+    
+        if (type === "animation") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent =
+            "✨ " +
+            (
+              item.file_name ||
+              "انیمیشن"
+            );
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.caption) {
+    
+            const caption = document.createElement("div");
+            caption.className = "file-caption";
+    
+            caption.textContent =
+              item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           STICKER
+           ===================================================== */
+    
+        if (type === "sticker") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent = "🏷️ استیکر";
+    
+          itemDiv.appendChild(title);
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           LOCATION
+           ===================================================== */
+    
+        if (type === "location") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent = "📍 موقعیت";
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.latitude !== undefined) {
+    
+            const locationText =
+              document.createElement("div");
+    
+            locationText.className =
+              "file-caption";
+    
+            locationText.textContent =
+              `عرض جغرافیایی: ${item.latitude}
+    طول جغرافیایی: ${item.longitude}`;
+    
+            itemDiv.appendChild(
+              locationText
+            );
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           CONTACT
+           ===================================================== */
+    
+        if (type === "contact") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent = "👤 مخاطب";
+    
+          itemDiv.appendChild(title);
+    
+    
+          if (item.first_name || item.last_name) {
+    
+            const contactName =
+              document.createElement("div");
+    
+            contactName.className =
+              "file-caption";
+    
+            contactName.textContent =
+              (
+                item.first_name || ""
+              ) +
+              " " +
+              (
+                item.last_name || ""
+              );
+    
+            itemDiv.appendChild(
+              contactName
+            );
+          }
+    
+    
+          if (item.phone_number) {
+    
+            const phone =
+              document.createElement("div");
+    
+            phone.className =
+              "file-caption";
+    
+            phone.textContent =
+              "📞 " +
+              item.phone_number;
+    
+            itemDiv.appendChild(
+              phone
+            );
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           VIDEO NOTE
+           ===================================================== */
+    
+        if (type === "video_note") {
+    
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "file-item";
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent =
+            "⭕️ پیام ویدئویی";
+    
+          itemDiv.appendChild(title);
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        /* =====================================================
+           هر نوع ناشناخته
+           ===================================================== */
+    
+        const unknown = document.createElement("div");
+    
+        unknown.className = "file-item";
+    
+        const unknownTitle =
+          document.createElement("div");
+    
+        unknownTitle.className =
+          "file-title";
+    
+        unknownTitle.textContent =
+          "📎 " +
+          (
+            item.file_name ||
+            item.title ||
+            "محتوا"
+          );
+    
+        unknown.appendChild(
+          unknownTitle
+        );
+    
+    
+        if (item.caption) {
+    
+          const caption =
+            document.createElement("div");
+    
+          caption.className =
+            "file-caption";
+    
+          caption.textContent =
+            item.caption;
+    
+          unknown.appendChild(
+            caption
+          );
+        }
+    
+    
+        /*
+         * برای اینکه هر محتوایی حتی اگر type جدیدی
+         * داشته باشد از دست نرود، اطلاعات متنی آن
+         * را هم نمایش می‌دهیم.
+         */
+    
+        if (
+          item.text ||
+          item.content
+        ) {
+    
+          const text =
+            document.createElement("div");
+    
+          text.className =
+            "file-caption";
+    
+          text.textContent =
+            item.text ||
+            item.content ||
+            "";
+    
+          unknown.appendChild(
+            text
+          );
+        }
+    
+    
+        box.appendChild(
+          unknown
+        );
+    
+      });
+    
+    
+      contentDiv.appendChild(box);
     }
-
-
+    
     /* =========================================================
        نمایش دکمه‌های پوشه
        ========================================================= */
