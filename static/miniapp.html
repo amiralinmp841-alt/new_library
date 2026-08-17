@@ -813,7 +813,7 @@
     /* =========================================================
        نمایش محتوا
        ========================================================= */
-
+       
     function renderContents(contents) {
     
       const contentDiv = document.getElementById("content");
@@ -839,75 +839,127 @@
     
         const type = item.type || "unknown";
     
-        /* =====================================================
-           TEXT
-           ===================================================== */
+        const itemDiv = document.createElement("div");
+        itemDiv.className = "text-item";
+    
+    
+        // =====================================================
+        // متن
+        // =====================================================
     
         if (type === "text") {
     
-          const textDiv = document.createElement("div");
-          textDiv.className = "text-item";
-    
-          textDiv.textContent =
+          itemDiv.textContent =
             item.text ||
             item.content ||
             "";
     
-          box.appendChild(textDiv);
+          box.appendChild(itemDiv);
     
           return;
         }
     
     
-        /* =====================================================
-           PHOTO
-           ===================================================== */
+        // =====================================================
+        // اگر file_id نداریم
+        // =====================================================
+    
+        if (!item.file_id) {
+    
+          const title = document.createElement("div");
+          title.className = "file-title";
+    
+          title.textContent =
+            "📎 " +
+            (
+              item.file_name ||
+              item.caption ||
+              "محتوا"
+            );
+    
+          itemDiv.appendChild(title);
+    
+          if (item.caption) {
+    
+            const caption =
+              document.createElement("div");
+    
+            caption.className =
+              "file-caption";
+    
+            caption.textContent =
+              item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        // =====================================================
+        // URL فایل
+        // =====================================================
+    
+        const filename =
+          item.file_name ||
+          "file";
+    
+        const fileUrl =
+          "/miniapp-file?file_id=" +
+          encodeURIComponent(item.file_id) +
+          "&filename=" +
+          encodeURIComponent(filename);
+    
+    
+        // =====================================================
+        // PHOTO
+        // =====================================================
     
         if (type === "photo") {
     
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
+          const img =
+            document.createElement("img");
     
-          const title = document.createElement("div");
-          title.className = "file-title";
+          img.src = fileUrl;
     
-          title.textContent =
-            "📷 " +
-            (
-              item.file_name ||
-              "عکس"
+          img.alt =
+            item.caption ||
+            "تصویر";
+    
+          img.style.width = "100%";
+          img.style.maxHeight = "500px";
+          img.style.objectFit = "contain";
+          img.style.borderRadius = "10px";
+          img.style.display = "block";
+          img.style.cursor = "pointer";
+    
+          img.onclick = () => {
+            window.open(
+              fileUrl,
+              "_blank"
             );
+          };
     
-          itemDiv.appendChild(title);
+          itemDiv.appendChild(img);
     
     
           if (item.caption) {
     
-            const caption = document.createElement("div");
-            caption.className = "file-caption";
+            const caption =
+              document.createElement("div");
     
-            caption.textContent = item.caption;
+            caption.className =
+              "file-caption";
+    
+            caption.textContent =
+              item.caption;
     
             itemDiv.appendChild(caption);
           }
     
-    
-          /*
-           * فعلاً file_id را نشان می‌دهیم.
-           * برای نمایش خود عکس باید endpoint فایل
-           * تلگرام را به Mini App اضافه کنیم.
-           */
-    
-          if (item.file_id) {
-    
-            const info = document.createElement("div");
-            info.className = "file-type";
-    
-            info.textContent =
-              "📎 فایل دریافت شد";
-    
-            itemDiv.appendChild(info);
-          }
     
           box.appendChild(itemDiv);
     
@@ -915,32 +967,95 @@
         }
     
     
-        /* =====================================================
-           VIDEO
-           ===================================================== */
+        // =====================================================
+        // VIDEO
+        // =====================================================
     
         if (type === "video") {
     
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
+          const video =
+            document.createElement("video");
     
-          const title = document.createElement("div");
-          title.className = "file-title";
+          video.src = fileUrl;
+    
+          video.controls = true;
+    
+          video.playsInline = true;
+    
+          video.preload = "metadata";
+    
+          video.style.width = "100%";
+          video.style.maxHeight = "500px";
+          video.style.borderRadius = "10px";
+    
+          itemDiv.appendChild(video);
+    
+    
+          if (item.caption) {
+    
+            const caption =
+              document.createElement("div");
+    
+            caption.className =
+              "file-caption";
+    
+            caption.textContent =
+              item.caption;
+    
+            itemDiv.appendChild(caption);
+          }
+    
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        // =====================================================
+        // AUDIO
+        // =====================================================
+    
+        if (
+          type === "audio" ||
+          type === "voice"
+        ) {
+    
+          const title =
+            document.createElement("div");
+    
+          title.className =
+            "file-title";
     
           title.textContent =
-            "🎬 " +
-            (
-              item.file_name ||
-              "ویدئو"
-            );
+            type === "voice"
+              ? "🎤 پیام صوتی"
+              : "🎵 فایل صوتی";
     
           itemDiv.appendChild(title);
     
     
+          const audio =
+            document.createElement("audio");
+    
+          audio.src = fileUrl;
+    
+          audio.controls = true;
+    
+          audio.preload = "metadata";
+    
+          audio.style.width = "100%";
+    
+          itemDiv.appendChild(audio);
+    
+    
           if (item.caption) {
     
-            const caption = document.createElement("div");
-            caption.className = "file-caption";
+            const caption =
+              document.createElement("div");
+    
+            caption.className =
+              "file-caption";
     
             caption.textContent =
               item.caption;
@@ -955,147 +1070,60 @@
         }
     
     
-        /* =====================================================
-           DOCUMENT
-           ===================================================== */
-    
-        if (type === "document") {
-    
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
-    
-          const title = document.createElement("div");
-          title.className = "file-title";
-    
-          title.textContent =
-            "📄 " +
-            (
-              item.file_name ||
-              "سند"
-            );
-    
-          itemDiv.appendChild(title);
-    
-    
-          if (item.caption) {
-    
-            const caption = document.createElement("div");
-            caption.className = "file-caption";
-    
-            caption.textContent =
-              item.caption;
-    
-            itemDiv.appendChild(caption);
-          }
-    
-    
-          box.appendChild(itemDiv);
-    
-          return;
-        }
-    
-    
-        /* =====================================================
-           AUDIO
-           ===================================================== */
-    
-        if (type === "audio") {
-    
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
-    
-          const title = document.createElement("div");
-          title.className = "file-title";
-    
-          title.textContent =
-            "🎵 " +
-            (
-              item.file_name ||
-              "فایل صوتی"
-            );
-    
-          itemDiv.appendChild(title);
-    
-    
-          if (item.caption) {
-    
-            const caption = document.createElement("div");
-            caption.className = "file-caption";
-    
-            caption.textContent =
-              item.caption;
-    
-            itemDiv.appendChild(caption);
-          }
-    
-    
-          box.appendChild(itemDiv);
-    
-          return;
-        }
-    
-    
-        /* =====================================================
-           VOICE
-           ===================================================== */
-    
-        if (type === "voice") {
-    
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
-    
-          const title = document.createElement("div");
-          title.className = "file-title";
-    
-          title.textContent = "🎤 پیام صوتی";
-    
-          itemDiv.appendChild(title);
-    
-    
-          if (item.caption) {
-    
-            const caption = document.createElement("div");
-            caption.className = "file-caption";
-    
-            caption.textContent =
-              item.caption;
-    
-            itemDiv.appendChild(caption);
-          }
-    
-    
-          box.appendChild(itemDiv);
-    
-          return;
-        }
-    
-    
-        /* =====================================================
-           ANIMATION
-           ===================================================== */
+        // =====================================================
+        // ANIMATION
+        // =====================================================
     
         if (type === "animation") {
     
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
+          const video =
+            document.createElement("video");
     
-          const title = document.createElement("div");
-          title.className = "file-title";
+          video.src = fileUrl;
+    
+          video.controls = true;
+    
+          video.loop = true;
+    
+          video.playsInline = true;
+    
+          video.style.width = "100%";
+          video.style.borderRadius = "10px";
+    
+          itemDiv.appendChild(video);
+    
+          box.appendChild(itemDiv);
+    
+          return;
+        }
+    
+    
+        // =====================================================
+        // DOCUMENT
+        // =====================================================
+    
+        if (type === "document") {
+    
+          const title =
+            document.createElement("div");
+    
+          title.className =
+            "file-title";
     
           title.textContent =
-            "✨ " +
-            (
-              item.file_name ||
-              "انیمیشن"
-            );
+            "📄 " +
+            filename;
     
           itemDiv.appendChild(title);
     
     
           if (item.caption) {
     
-            const caption = document.createElement("div");
-            caption.className = "file-caption";
+            const caption =
+              document.createElement("div");
+    
+            caption.className =
+              "file-caption";
     
             caption.textContent =
               item.caption;
@@ -1104,131 +1132,86 @@
           }
     
     
-          box.appendChild(itemDiv);
+          // دکمه مشاهده
+          const openButton =
+            document.createElement("a");
     
-          return;
-        }
+          openButton.href = fileUrl;
     
+          openButton.target = "_blank";
     
-        /* =====================================================
-           STICKER
-           ===================================================== */
+          openButton.textContent =
+            "👁 مشاهده فایل";
     
-        if (type === "sticker") {
+          openButton.style.display =
+            "block";
     
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
+          openButton.style.marginTop =
+            "10px";
     
-          const title = document.createElement("div");
-          title.className = "file-title";
+          openButton.style.textAlign =
+            "center";
     
-          title.textContent = "🏷️ استیکر";
+          openButton.style.padding =
+            "10px";
     
-          itemDiv.appendChild(title);
+          openButton.style.borderRadius =
+            "8px";
     
-          box.appendChild(itemDiv);
+          openButton.style.background =
+            "var(--tg-theme-button-color, #2481cc)";
     
-          return;
-        }
+          openButton.style.color =
+            "white";
     
+          openButton.style.textDecoration =
+            "none";
     
-        /* =====================================================
-           LOCATION
-           ===================================================== */
-    
-        if (type === "location") {
-    
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
-    
-          const title = document.createElement("div");
-          title.className = "file-title";
-    
-          title.textContent = "📍 موقعیت";
-    
-          itemDiv.appendChild(title);
+          itemDiv.appendChild(
+            openButton
+          );
     
     
-          if (item.latitude !== undefined) {
+          // دکمه دانلود
+          const downloadButton =
+            document.createElement("a");
     
-            const locationText =
-              document.createElement("div");
+          downloadButton.href =
+            fileUrl;
     
-            locationText.className =
-              "file-caption";
+          downloadButton.download =
+            filename;
     
-            locationText.textContent =
-              `عرض جغرافیایی: ${item.latitude}
-    طول جغرافیایی: ${item.longitude}`;
+          downloadButton.textContent =
+            "⬇️ دانلود فایل";
     
-            itemDiv.appendChild(
-              locationText
-            );
-          }
+          downloadButton.style.display =
+            "block";
     
+          downloadButton.style.marginTop =
+            "8px";
     
-          box.appendChild(itemDiv);
+          downloadButton.style.textAlign =
+            "center";
     
-          return;
-        }
+          downloadButton.style.padding =
+            "10px";
     
+          downloadButton.style.borderRadius =
+            "8px";
     
-        /* =====================================================
-           CONTACT
-           ===================================================== */
+          downloadButton.style.background =
+            "var(--tg-theme-secondary-bg-color, #eee)";
     
-        if (type === "contact") {
+          downloadButton.style.color =
+            "var(--tg-theme-text-color, #222)";
     
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
+          downloadButton.style.textDecoration =
+            "none";
     
-          const title = document.createElement("div");
-          title.className = "file-title";
-    
-          title.textContent = "👤 مخاطب";
-    
-          itemDiv.appendChild(title);
-    
-    
-          if (item.first_name || item.last_name) {
-    
-            const contactName =
-              document.createElement("div");
-    
-            contactName.className =
-              "file-caption";
-    
-            contactName.textContent =
-              (
-                item.first_name || ""
-              ) +
-              " " +
-              (
-                item.last_name || ""
-              );
-    
-            itemDiv.appendChild(
-              contactName
-            );
-          }
-    
-    
-          if (item.phone_number) {
-    
-            const phone =
-              document.createElement("div");
-    
-            phone.className =
-              "file-caption";
-    
-            phone.textContent =
-              "📞 " +
-              item.phone_number;
-    
-            itemDiv.appendChild(
-              phone
-            );
-          }
+          itemDiv.appendChild(
+            downloadButton
+          );
     
     
           box.appendChild(itemDiv);
@@ -1237,104 +1220,65 @@
         }
     
     
-        /* =====================================================
-           VIDEO NOTE
-           ===================================================== */
+        // =====================================================
+        // سایر فایل‌ها
+        // =====================================================
     
-        if (type === "video_note") {
-    
-          const itemDiv = document.createElement("div");
-          itemDiv.className = "file-item";
-    
-          const title = document.createElement("div");
-          title.className = "file-title";
-    
-          title.textContent =
-            "⭕️ پیام ویدئویی";
-    
-          itemDiv.appendChild(title);
-    
-          box.appendChild(itemDiv);
-    
-          return;
-        }
-    
-    
-        /* =====================================================
-           هر نوع ناشناخته
-           ===================================================== */
-    
-        const unknown = document.createElement("div");
-    
-        unknown.className = "file-item";
-    
-        const unknownTitle =
+        const title =
           document.createElement("div");
     
-        unknownTitle.className =
+        title.className =
           "file-title";
     
-        unknownTitle.textContent =
+        title.textContent =
           "📎 " +
-          (
-            item.file_name ||
-            item.title ||
-            "محتوا"
-          );
+          filename;
     
-        unknown.appendChild(
-          unknownTitle
+        itemDiv.appendChild(title);
+    
+    
+        const openButton =
+          document.createElement("a");
+    
+        openButton.href =
+          fileUrl;
+    
+        openButton.target =
+          "_blank";
+    
+        openButton.textContent =
+          "📂 باز کردن فایل";
+    
+        openButton.style.display =
+          "block";
+    
+        openButton.style.marginTop =
+          "10px";
+    
+        openButton.style.padding =
+          "10px";
+    
+        openButton.style.textAlign =
+          "center";
+    
+        openButton.style.borderRadius =
+          "8px";
+    
+        openButton.style.background =
+          "var(--tg-theme-button-color, #2481cc)";
+    
+        openButton.style.color =
+          "white";
+    
+        openButton.style.textDecoration =
+          "none";
+    
+        itemDiv.appendChild(
+          openButton
         );
     
     
-        if (item.caption) {
-    
-          const caption =
-            document.createElement("div");
-    
-          caption.className =
-            "file-caption";
-    
-          caption.textContent =
-            item.caption;
-    
-          unknown.appendChild(
-            caption
-          );
-        }
-    
-    
-        /*
-         * برای اینکه هر محتوایی حتی اگر type جدیدی
-         * داشته باشد از دست نرود، اطلاعات متنی آن
-         * را هم نمایش می‌دهیم.
-         */
-    
-        if (
-          item.text ||
-          item.content
-        ) {
-    
-          const text =
-            document.createElement("div");
-    
-          text.className =
-            "file-caption";
-    
-          text.textContent =
-            item.text ||
-            item.content ||
-            "";
-    
-          unknown.appendChild(
-            text
-          );
-        }
-    
-    
-        box.appendChild(
-          unknown
-        );
+        box.appendChild(itemDiv);
     
       });
     
@@ -1342,194 +1286,6 @@
       contentDiv.appendChild(box);
     }
     
-    /* =========================================================
-       نمایش دکمه‌های پوشه
-       ========================================================= */
-
-    function renderButtons(node) {
-
-      const buttonsDiv =
-        document.getElementById(
-          "buttons"
-        );
-
-
-      buttonsDiv.innerHTML = "";
-
-
-      const rows =
-        Array.isArray(node.rows)
-          ? node.rows
-          : [];
-
-
-      rows.forEach(
-        (rowChildren) => {
-
-          const row =
-            document.createElement(
-              "div"
-            );
-
-
-          row.className =
-            "row";
-
-
-          rowChildren.forEach(
-            (child) => {
-
-              const button =
-                document.createElement(
-                  "button"
-                );
-
-
-              button.type =
-                "button";
-
-
-              button.className =
-                "btn";
-
-
-              applyStyle(
-                button,
-                child.style
-              );
-
-
-              const name =
-                document.createElement(
-                  "span"
-                );
-
-
-              name.textContent =
-                child.name ||
-                "بدون نام";
-
-
-              button.appendChild(
-                name
-              );
-
-
-              /* تعداد محتوا */
-
-              if (
-                child.content_count
-              ) {
-
-                const count =
-                  document.createElement(
-                    "span"
-                  );
-
-
-                count.className =
-                  "count";
-
-
-                count.textContent =
-                  `${child.content_count} 📎`;
-
-
-                button.appendChild(
-                  count
-                );
-
-              }
-
-              /* فلش */
-
-              else if (
-                child.has_children
-              ) {
-
-                const arrow =
-                  document.createElement(
-                    "span"
-                  );
-
-
-                arrow.className =
-                  "arrow";
-
-
-                arrow.textContent =
-                  "▸";
-
-
-                button.appendChild(
-                  arrow
-                );
-
-              }
-
-
-              /* کلیک */
-
-              button.onclick = () => {
-
-                historyStack.push(
-                  node.id
-                );
-
-
-                render(
-                  child.id
-                );
-
-              };
-
-
-              row.appendChild(
-                button
-              );
-
-            }
-          );
-
-
-          buttonsDiv.appendChild(
-            row
-          );
-
-        }
-      );
-
-
-      /* وضعیت خالی */
-
-      const empty =
-        document.getElementById(
-          "empty"
-        );
-
-
-      const hasFolders =
-        rows.length > 0;
-
-
-      const hasContents =
-        Array.isArray(node.contents) &&
-        node.contents.length > 0;
-
-
-      empty.textContent =
-        "این پوشه خالی است.";
-
-
-      empty.style.display =
-        (
-          !hasFolders &&
-          !hasContents
-        )
-          ? "block"
-          : "none";
-
-    }
 
 
     /* =========================================================
