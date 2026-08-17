@@ -6346,16 +6346,39 @@ async def main():
     # aiohttp web app برای Health check و Webhook
     webapp = web.Application()
     webapp["tg"] = tg_app
+
+    # ⭐ مهم: برای miniapp_file
+    webapp["bot"] = tg_app.bot
+
     webapp.router.add_get("/", health)
     webapp.router.add_get("/health", health)
     webapp.router.add_post(f"/{TOKEN}", webhook_handler)
 
-    # ===== مینی‌اپ =====
-    static_html = os.path.join(os.path.dirname(__file__), "static", "miniapp.html")
-    webapp.router.add_get("/miniapp", lambda r: web.FileResponse(static_html))
+    # ================= MINI APP =================
 
-    # مستقیماً تابع ایمپورت‌شده از miniapp.py را قرار دهید:
-    webapp.router.add_get("/miniapp-data", miniapp_data)
+    static_html = os.path.join(
+        os.path.dirname(__file__),
+        "static",
+        "miniapp.html"
+    )
+
+    webapp.router.add_get(
+        "/miniapp",
+        lambda r: web.FileResponse(static_html)
+    )
+
+    # اطلاعات دیتابیس
+    webapp.router.add_get(
+        "/miniapp-data",
+        miniapp_data
+    )
+
+    # ⭐⭐⭐ دریافت واقعی فایل از Telegram
+    webapp.router.add_get(
+        "/miniapp-file",
+        miniapp_file
+    )
+    
     # ====================
 
     runner = web.AppRunner(webapp)
