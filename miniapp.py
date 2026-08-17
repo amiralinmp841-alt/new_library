@@ -2,17 +2,30 @@ import json
 import os
 from aiohttp import web
 
-DB_FILE = os.getenv("DB_FILE", "/tmp/database.json")
+DB_FILE = "/tmp/database.json"
 
 def load_db():
     try:
+        print("MINIAPP DB FILE:", DB_FILE)
+        print("MINIAPP DB EXISTS:", os.path.exists(DB_FILE))
+
         with open(DB_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, dict):
-                return data
-            return {}
+
+        print("MINIAPP DB SIZE:", len(data))
+        print("MINIAPP ROOT:", data.get("root"))
+        print(
+            "MINIAPP ROOT CHILDREN:",
+            data.get("root", {}).get("children", [])
+        )
+
+        if isinstance(data, dict):
+            return data
+
+        return {}
+
     except Exception as e:
-        print("miniapp load_db error:", e)
+        print("miniapp load_db error:", repr(e))
         return {}
 
 def get_style(node):
