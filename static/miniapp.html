@@ -813,7 +813,7 @@
     /* =========================================================
        نمایش محتوا
        ========================================================= */
-       
+    
     function renderContents(contents) {
     
       const contentDiv = document.getElementById("content");
@@ -1286,6 +1286,195 @@
       contentDiv.appendChild(box);
     }
     
+    
+    /* =========================================================
+       نمایش دکمه‌های پوشه
+       ========================================================= */
+
+    function renderButtons(node) {
+
+      const buttonsDiv =
+        document.getElementById(
+          "buttons"
+        );
+
+
+      buttonsDiv.innerHTML = "";
+
+
+      const rows =
+        Array.isArray(node.rows)
+          ? node.rows
+          : [];
+
+
+      rows.forEach(
+        (rowChildren) => {
+
+          const row =
+            document.createElement(
+              "div"
+            );
+
+
+          row.className =
+            "row";
+
+
+          rowChildren.forEach(
+            (child) => {
+
+              const button =
+                document.createElement(
+                  "button"
+                );
+
+
+              button.type =
+                "button";
+
+
+              button.className =
+                "btn";
+
+
+              applyStyle(
+                button,
+                child.style
+              );
+
+
+              const name =
+                document.createElement(
+                  "span"
+                );
+
+
+              name.textContent =
+                child.name ||
+                "بدون نام";
+
+
+              button.appendChild(
+                name
+              );
+
+
+              /* تعداد محتوا */
+
+              if (
+                child.content_count
+              ) {
+
+                const count =
+                  document.createElement(
+                    "span"
+                  );
+
+
+                count.className =
+                  "count";
+
+
+                count.textContent =
+                  `${child.content_count} 📎`;
+
+
+                button.appendChild(
+                  count
+                );
+
+              }
+
+              /* فلش */
+
+              else if (
+                child.has_children
+              ) {
+
+                const arrow =
+                  document.createElement(
+                    "span"
+                  );
+
+
+                arrow.className =
+                  "arrow";
+
+
+                arrow.textContent =
+                  "▸";
+
+
+                button.appendChild(
+                  arrow
+                );
+
+              }
+
+
+              /* کلیک */
+
+              button.onclick = () => {
+
+                historyStack.push(
+                  node.id
+                );
+
+
+                render(
+                  child.id
+                );
+
+              };
+
+
+              row.appendChild(
+                button
+              );
+
+            }
+          );
+
+
+          buttonsDiv.appendChild(
+            row
+          );
+
+        }
+      );
+
+
+      /* وضعیت خالی */
+
+      const empty =
+        document.getElementById(
+          "empty"
+        );
+
+
+      const hasFolders =
+        rows.length > 0;
+
+
+      const hasContents =
+        Array.isArray(node.contents) &&
+        node.contents.length > 0;
+
+
+      empty.textContent =
+        "این پوشه خالی است.";
+
+
+      empty.style.display =
+        (
+          !hasFolders &&
+          !hasContents
+        )
+          ? "block"
+          : "none";
+
+    }
 
 
     /* =========================================================
