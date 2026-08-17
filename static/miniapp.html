@@ -2,10 +2,12 @@
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8" />
+
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
   />
+
   <title>کتابخانه مجازی</title>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -59,7 +61,7 @@
       padding: 14px;
       margin-bottom: 16px;
       border: 1px solid rgba(0, 0, 0, 0.08);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
     }
 
     .content-box h3 {
@@ -79,21 +81,66 @@
       line-height: 1.8;
     }
 
+    /* =========================
+       فایل‌ها
+       ========================= */
+
+    .file-item {
+      background: var(--tg-theme-bg-color, #f7f7f7);
+      border-radius: 10px;
+      padding: 12px;
+      margin: 8px 0;
+      transition: transform 0.08s ease, filter 0.1s ease;
+    }
+
+    .file-item.has-file {
+      cursor: pointer;
+    }
+
+    .file-item.has-file:active {
+      transform: scale(0.985);
+      filter: brightness(0.95);
+    }
+
     .file-title {
       font-weight: 600;
-      margin-bottom: 4px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 7px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .file-name {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .file-open {
+      font-size: 0.8rem;
+      opacity: 0.65;
+      white-space: nowrap;
     }
 
     .file-caption {
       font-size: 0.85rem;
       opacity: 0.85;
       white-space: pre-wrap;
-      margin-top: 4px;
+      margin-top: 6px;
       line-height: 1.6;
+      word-break: break-word;
     }
+
+    .file-type {
+      display: inline-block;
+      margin-top: 7px;
+      font-size: 0.72rem;
+      opacity: 0.55;
+    }
+
+    /* =========================
+       دکمه‌ها
+       ========================= */
 
     .row {
       display: flex;
@@ -141,12 +188,33 @@
     }
 
     /* پالت رنگ‌ها */
-    .green { background: linear-gradient(135deg, #2ecc71, #27ae60); }
-    .blue { background: linear-gradient(135deg, #3498db, #2980b9); }
-    .red { background: linear-gradient(135deg, #e74c3c, #c0392b); }
-    .orange { background: linear-gradient(135deg, #e67e22, #d35400); }
-    .purple { background: linear-gradient(135deg, #9b59b6, #8e44ad); }
-    .none { background: var(--tg-theme-button-color, #2481cc); }
+    .green {
+      background: linear-gradient(135deg, #2ecc71, #27ae60);
+    }
+
+    .blue {
+      background: linear-gradient(135deg, #3498db, #2980b9);
+    }
+
+    .red {
+      background: linear-gradient(135deg, #e74c3c, #c0392b);
+    }
+
+    .orange {
+      background: linear-gradient(135deg, #e67e22, #d35400);
+    }
+
+    .purple {
+      background: linear-gradient(135deg, #9b59b6, #8e44ad);
+    }
+
+    .none {
+      background: var(--tg-theme-button-color, #2481cc);
+    }
+
+    /* =========================
+       فوتر
+       ========================= */
 
     .footer {
       display: flex;
@@ -178,282 +246,1084 @@
       padding: 30px 10px;
       font-size: 0.95rem;
     }
+
+    .loading {
+      text-align: center;
+      color: var(--tg-theme-hint-color, #888);
+      padding: 30px 10px;
+    }
   </style>
 </head>
 
 <body>
+
   <div class="header">
     <h1 id="title">📚 در حال دریافت...</h1>
     <div class="crumb" id="crumb"></div>
   </div>
 
   <div id="content"></div>
+
   <div id="buttons"></div>
 
-  <p id="empty" class="empty" style="display: none;">این بخش خالی است.</p>
+  <p
+    id="empty"
+    class="empty"
+    style="display: none;"
+  >
+    این بخش خالی است.
+  </p>
 
   <div class="footer">
-    <button type="button" id="btn-back" onclick="goBack()">🔙 بازگشت</button>
-    <button type="button" onclick="goTo('root')">🏠 خانه</button>
+
+    <button
+      type="button"
+      id="btn-back"
+      onclick="goBack()"
+    >
+      🔙 بازگشت
+    </button>
+
+    <button
+      type="button"
+      onclick="goTo('root')"
+    >
+      🏠 خانه
+    </button>
+
   </div>
 
+
   <script>
+
+    /* =========================================================
+       Telegram WebApp
+       ========================================================= */
+
     const tg = window.Telegram?.WebApp;
 
     if (tg) {
+
       tg.ready();
       tg.expand();
+
       if (tg.BackButton) {
-        tg.BackButton.onClick(() => goBack());
+
+        tg.BackButton.onClick(() => {
+          goBack();
+        });
+
       }
+
     }
+
+
+    /* =========================================================
+       History
+       ========================================================= */
 
     let historyStack = [];
 
+
+    /* =========================================================
+       Content Icons
+       ========================================================= */
+
     const contentIcons = {
+
       photo: "📷",
+
       video: "🎬",
-      document: "📁",
+
+      document: "📄",
+
       audio: "🎵",
+
       voice: "🎤",
+
       animation: "✨",
+
       sticker: "🏷️",
+
       video_note: "⭕️",
+
       contact: "👤",
-      location: "📍"
+
+      location: "📍",
+
+      text: "📝"
+
     };
 
+
+    /* =========================================================
+       Type Names
+       ========================================================= */
+
+    const contentTypeNames = {
+
+      photo: "عکس",
+
+      video: "ویدئو",
+
+      document: "سند",
+
+      audio: "صوت",
+
+      voice: "پیام صوتی",
+
+      animation: "انیمیشن",
+
+      sticker: "استیکر",
+
+      video_note: "ویدئوی گرد",
+
+      contact: "مخاطب",
+
+      location: "موقعیت",
+
+      text: "متن"
+
+    };
+
+
+    /* =========================================================
+       دریافت اطلاعات نود
+       ========================================================= */
+
     async function fetchNode(nodeId) {
+
       const response = await fetch(
-        "/miniapp-data?node=" + encodeURIComponent(nodeId),
-        { cache: "no-store" }
+        "/miniapp-data?node=" +
+        encodeURIComponent(nodeId),
+        {
+          cache: "no-store"
+        }
       );
 
+
       let result;
+
       try {
+
         result = await response.json();
+
       } catch (error) {
-        throw new Error("پاسخ سرور نامعتبر است.");
+
+        throw new Error(
+          "پاسخ سرور نامعتبر است."
+        );
+
       }
+
 
       if (!response.ok || result.ok === false) {
-        throw new Error(result.error || "خطا در دریافت اطلاعات.");
+
+        throw new Error(
+          result.error ||
+          "خطا در دریافت اطلاعات."
+        );
+
       }
+
 
       return result.data || result;
+
     }
+
+
+    /* =========================================================
+       اعمال رنگ دکمه
+       ========================================================= */
 
     function applyStyle(element, style) {
+
       if (!style || style === "none") {
+
         element.classList.add("none");
+
         return;
       }
-      if (typeof style === "string" && style.startsWith("#")) {
+
+
+      if (
+        typeof style === "string" &&
+        style.startsWith("#")
+      ) {
+
         element.style.background = style;
+
         return;
       }
-      const safeClass = String(style).replace(/[^a-zA-Z0-9_-]/g, "");
-      element.classList.add(safeClass || "none");
+
+
+      const safeClass =
+        String(style)
+          .replace(
+            /[^a-zA-Z0-9_-]/g,
+            ""
+          );
+
+
+      element.classList.add(
+        safeClass || "none"
+      );
+
     }
+
+
+    /* =========================================================
+       دکمه‌های ناوبری
+       ========================================================= */
 
     function updateNavButtons(currentNodeId) {
-      const isRoot = currentNodeId === "root" || historyStack.length === 0;
-      
-      const backBtn = document.getElementById("btn-back");
+
+      const isRoot =
+        currentNodeId === "root" ||
+        historyStack.length === 0;
+
+
+      const backBtn =
+        document.getElementById(
+          "btn-back"
+        );
+
+
       if (backBtn) {
-        backBtn.style.opacity = isRoot ? "0.5" : "1";
+
+        backBtn.style.opacity =
+          isRoot ? "0.5" : "1";
+
         backBtn.disabled = isRoot;
+
       }
+
 
       if (tg?.BackButton) {
+
         if (isRoot) {
+
           tg.BackButton.hide();
+
         } else {
+
           tg.BackButton.show();
+
         }
+
       }
+
     }
+
+
+    /* =========================================================
+       Breadcrumb
+       ========================================================= */
 
     function renderCrumb(node) {
-      const crumb = document.getElementById("crumb");
+
+      const crumb =
+        document.getElementById(
+          "crumb"
+        );
+
+
       crumb.innerHTML = "";
 
-      const breadcrumb = node.breadcrumb || [];
 
-      breadcrumb.forEach((item, index) => {
-        const link = document.createElement("a");
-        link.textContent = item.name || "بدون نام";
-        link.onclick = (e) => {
-          e.preventDefault();
-          goTo(item.id);
-        };
+      const breadcrumb =
+        Array.isArray(node.breadcrumb)
+          ? node.breadcrumb
+          : [];
 
-        crumb.appendChild(link);
 
-        if (index < breadcrumb.length - 1) {
-          crumb.appendChild(document.createTextNode(" › "));
-        }
-      });
-    }
+      breadcrumb.forEach(
+        (item, index) => {
 
-    function renderContents(contents) {
-      const contentDiv = document.getElementById("content");
-      contentDiv.innerHTML = "";
+          const link =
+            document.createElement("a");
 
-      if (!Array.isArray(contents) || contents.length === 0) {
-        return;
-      }
 
-      const box = document.createElement("div");
-      box.className = "content-box";
+          link.textContent =
+            item.name || "بدون نام";
 
-      const heading = document.createElement("h3");
-      heading.textContent = "📂 محتوای این بخش";
-      box.appendChild(heading);
 
-      contents.forEach((item) => {
-        if (!item || typeof item !== "object") return;
+          link.onclick = (e) => {
 
-        const itemDiv = document.createElement("div");
-        itemDiv.className = "text-item";
+            e.preventDefault();
 
-        if (item.type === "text") {
-          itemDiv.textContent = item.text || "";
-          box.appendChild(itemDiv);
-          return;
-        }
+            goTo(item.id);
 
-        const icon = contentIcons[item.type] || "📎";
-        const title = document.createElement("div");
-        title.className = "file-title";
-
-        const fileName = item.file_name || item.filename || item.caption || "";
-        const typeName = item.type || "فایل";
-
-        title.textContent = `${icon} ${fileName || "فایل " + typeName}`;
-        itemDiv.appendChild(title);
-
-        if (item.caption && item.caption !== fileName) {
-          const caption = document.createElement("div");
-          caption.className = "file-caption";
-          caption.textContent = item.caption;
-          itemDiv.appendChild(caption);
-        }
-
-        box.appendChild(itemDiv);
-      });
-
-      contentDiv.appendChild(box);
-    }
-
-    function renderButtons(node) {
-      const buttonsDiv = document.getElementById("buttons");
-      buttonsDiv.innerHTML = "";
-
-      const rows = Array.isArray(node.rows) ? node.rows : [];
-
-      rows.forEach((rowChildren) => {
-        const row = document.createElement("div");
-        row.className = "row";
-
-        rowChildren.forEach((child) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "btn";
-
-          applyStyle(button, child.style);
-
-          const name = document.createElement("span");
-          name.textContent = child.name || "بدون نام";
-          button.appendChild(name);
-
-          if (child.content_count) {
-            const count = document.createElement("span");
-            count.className = "count";
-            count.textContent = `${child.content_count} 📎`;
-            button.appendChild(count);
-          } else if (child.has_children) {
-            const arrow = document.createElement("span");
-            arrow.className = "arrow";
-            arrow.textContent = "▸";
-            button.appendChild(arrow);
-          }
-
-          button.onclick = () => {
-            historyStack.push(node.id);
-            render(child.id);
           };
 
-          row.appendChild(button);
-        });
 
-        buttonsDiv.appendChild(row);
-      });
+          crumb.appendChild(link);
 
-      const empty = document.getElementById("empty");
-      const hasFolders = rows.length > 0;
-      const hasContents = Array.isArray(node.contents) && node.contents.length > 0;
 
-      empty.textContent = "این پوشه خالی است.";
-      empty.style.display = (!hasFolders && !hasContents) ? "block" : "none";
+          if (
+            index <
+            breadcrumb.length - 1
+          ) {
+
+            crumb.appendChild(
+              document.createTextNode(
+                " › "
+              )
+            );
+
+          }
+
+        }
+      );
+
     }
+
+
+    /* =========================================================
+       نام فایل
+       ========================================================= */
+
+    function getFileName(item) {
+
+      return (
+        item.file_name ||
+        item.filename ||
+        item.document_name ||
+        item.title ||
+        ""
+      );
+
+    }
+
+
+    /* =========================================================
+       ساخت کارت فایل
+       ========================================================= */
+
+    function createFileItem(item) {
+
+      const itemDiv =
+        document.createElement("div");
+
+
+      itemDiv.className =
+        "file-item";
+
+
+      const icon =
+        contentIcons[item.type] ||
+        "📎";
+
+
+      const typeName =
+        contentTypeNames[item.type] ||
+        "فایل";
+
+
+      const fileName =
+        getFileName(item);
+
+
+      /* ---------- عنوان ---------- */
+
+      const title =
+        document.createElement("div");
+
+
+      title.className =
+        "file-title";
+
+
+      const iconSpan =
+        document.createElement("span");
+
+
+      iconSpan.textContent =
+        icon;
+
+
+      const nameSpan =
+        document.createElement("span");
+
+
+      nameSpan.className =
+        "file-name";
+
+
+      nameSpan.textContent =
+        fileName ||
+        `فایل ${typeName}`;
+
+
+      title.appendChild(
+        iconSpan
+      );
+
+
+      title.appendChild(
+        nameSpan
+      );
+
+
+      /* ---------- وضعیت فایل ---------- */
+
+      if (item.file_id) {
+
+        const openSpan =
+          document.createElement("span");
+
+
+        openSpan.className =
+          "file-open";
+
+
+        openSpan.textContent =
+          "مشاهده";
+
+
+        title.appendChild(
+          openSpan
+        );
+
+
+        itemDiv.classList.add(
+          "has-file"
+        );
+
+
+        /*
+         * فعلاً فقط مشخص می‌کنیم فایل
+         * file_id دارد.
+         *
+         * برای باز کردن واقعی فایل باید
+         * endpoint سمت Python اضافه شود.
+         */
+
+        itemDiv.onclick = () => {
+
+          handleFileClick(item);
+
+        };
+
+      }
+
+
+      itemDiv.appendChild(
+        title
+      );
+
+
+      /* ---------- Caption ---------- */
+
+      const caption =
+        item.caption || "";
+
+
+      if (
+        caption &&
+        caption !== fileName
+      ) {
+
+        const captionDiv =
+          document.createElement(
+            "div"
+          );
+
+
+        captionDiv.className =
+          "file-caption";
+
+
+        captionDiv.textContent =
+          caption;
+
+
+        itemDiv.appendChild(
+          captionDiv
+        );
+
+      }
+
+
+      /* ---------- نوع ---------- */
+
+      const typeDiv =
+        document.createElement(
+          "div"
+        );
+
+
+      typeDiv.className =
+        "file-type";
+
+
+      typeDiv.textContent =
+        typeName;
+
+
+      itemDiv.appendChild(
+        typeDiv
+      );
+
+
+      return itemDiv;
+
+    }
+
+
+    /* =========================================================
+       کلیک روی فایل
+       ========================================================= */
+
+    function handleFileClick(item) {
+
+      /*
+       * در این مرحله file_id داریم،
+       * ولی مرورگر مستقیماً نمی‌تواند
+       * file_id تلگرام را باز کند.
+       *
+       * بعداً اینجا endpoint فایل را
+       * صدا می‌زنیم.
+       */
+
+      if (!item.file_id) {
+
+        return;
+
+      }
+
+
+      if (tg?.showAlert) {
+
+        tg.showAlert(
+          "این فایل هنوز به سرویس دریافت فایل متصل نشده است."
+        );
+
+      } else {
+
+        alert(
+          "این فایل هنوز به سرویس دریافت فایل متصل نشده است."
+        );
+
+      }
+
+    }
+
+
+    /* =========================================================
+       نمایش محتوا
+       ========================================================= */
+
+    function renderContents(contents) {
+
+      const contentDiv =
+        document.getElementById(
+          "content"
+        );
+
+
+      contentDiv.innerHTML = "";
+
+
+      if (
+        !Array.isArray(contents) ||
+        contents.length === 0
+      ) {
+
+        return;
+
+      }
+
+
+      const box =
+        document.createElement("div");
+
+
+      box.className =
+        "content-box";
+
+
+      const heading =
+        document.createElement("h3");
+
+
+      heading.textContent =
+        "📂 محتوای این بخش";
+
+
+      box.appendChild(
+        heading
+      );
+
+
+      contents.forEach(
+        (item) => {
+
+          if (
+            !item ||
+            typeof item !== "object"
+          ) {
+
+            return;
+
+          }
+
+
+          /* ---------- متن ---------- */
+
+          if (
+            item.type === "text"
+          ) {
+
+            const textDiv =
+              document.createElement(
+                "div"
+              );
+
+
+            textDiv.className =
+              "text-item";
+
+
+            textDiv.textContent =
+              item.text ||
+              item.content ||
+              "";
+
+
+            box.appendChild(
+              textDiv
+            );
+
+
+            return;
+
+          }
+
+
+          /* ---------- فایل ---------- */
+
+          const fileItem =
+            createFileItem(item);
+
+
+          box.appendChild(
+            fileItem
+          );
+
+        }
+      );
+
+
+      contentDiv.appendChild(
+        box
+      );
+
+    }
+
+
+    /* =========================================================
+       نمایش دکمه‌های پوشه
+       ========================================================= */
+
+    function renderButtons(node) {
+
+      const buttonsDiv =
+        document.getElementById(
+          "buttons"
+        );
+
+
+      buttonsDiv.innerHTML = "";
+
+
+      const rows =
+        Array.isArray(node.rows)
+          ? node.rows
+          : [];
+
+
+      rows.forEach(
+        (rowChildren) => {
+
+          const row =
+            document.createElement(
+              "div"
+            );
+
+
+          row.className =
+            "row";
+
+
+          rowChildren.forEach(
+            (child) => {
+
+              const button =
+                document.createElement(
+                  "button"
+                );
+
+
+              button.type =
+                "button";
+
+
+              button.className =
+                "btn";
+
+
+              applyStyle(
+                button,
+                child.style
+              );
+
+
+              const name =
+                document.createElement(
+                  "span"
+                );
+
+
+              name.textContent =
+                child.name ||
+                "بدون نام";
+
+
+              button.appendChild(
+                name
+              );
+
+
+              /* تعداد محتوا */
+
+              if (
+                child.content_count
+              ) {
+
+                const count =
+                  document.createElement(
+                    "span"
+                  );
+
+
+                count.className =
+                  "count";
+
+
+                count.textContent =
+                  `${child.content_count} 📎`;
+
+
+                button.appendChild(
+                  count
+                );
+
+              }
+
+              /* فلش */
+
+              else if (
+                child.has_children
+              ) {
+
+                const arrow =
+                  document.createElement(
+                    "span"
+                  );
+
+
+                arrow.className =
+                  "arrow";
+
+
+                arrow.textContent =
+                  "▸";
+
+
+                button.appendChild(
+                  arrow
+                );
+
+              }
+
+
+              /* کلیک */
+
+              button.onclick = () => {
+
+                historyStack.push(
+                  node.id
+                );
+
+
+                render(
+                  child.id
+                );
+
+              };
+
+
+              row.appendChild(
+                button
+              );
+
+            }
+          );
+
+
+          buttonsDiv.appendChild(
+            row
+          );
+
+        }
+      );
+
+
+      /* وضعیت خالی */
+
+      const empty =
+        document.getElementById(
+          "empty"
+        );
+
+
+      const hasFolders =
+        rows.length > 0;
+
+
+      const hasContents =
+        Array.isArray(node.contents) &&
+        node.contents.length > 0;
+
+
+      empty.textContent =
+        "این پوشه خالی است.";
+
+
+      empty.style.display =
+        (
+          !hasFolders &&
+          !hasContents
+        )
+          ? "block"
+          : "none";
+
+    }
+
+
+    /* =========================================================
+       نمایش نود
+       ========================================================= */
 
     async function render(nodeId) {
-      const empty = document.getElementById("empty");
+
+      const empty =
+        document.getElementById(
+          "empty"
+        );
+
 
       try {
-        empty.style.display = "none";
-        const node = await fetchNode(nodeId);
 
-        if (!node || !node.id) {
-          throw new Error("داده‌های پوشه معتبر نیستند.");
+        empty.style.display =
+          "none";
+
+
+        const node =
+          await fetchNode(
+            nodeId
+          );
+
+
+        if (
+          !node ||
+          !node.id
+        ) {
+
+          throw new Error(
+            "داده‌های پوشه معتبر نیستند."
+          );
+
         }
 
-        document.getElementById("title").textContent = node.name || "📚 کتابخانه";
+
+        /* عنوان */
+
+        document.getElementById(
+          "title"
+        ).textContent =
+          node.name ||
+          "📚 کتابخانه";
+
+
+        /* مسیر */
+
         renderCrumb(node);
-        renderContents(node.contents);
+
+
+        /* محتوا */
+
+        renderContents(
+          node.contents
+        );
+
+
+        /* پوشه‌ها */
+
         renderButtons(node);
-        updateNavButtons(node.id);
 
-        window.scrollTo(0, 0);
-      } catch (error) {
-        console.error("Miniapp render error:", error);
 
-        document.getElementById("title").textContent = "📚 کتابخانه";
-        document.getElementById("crumb").innerHTML = "";
-        document.getElementById("content").innerHTML = "";
-        document.getElementById("buttons").innerHTML = "";
+        /* ناوبری */
 
-        empty.textContent = "خطا در دریافت اطلاعات: " + error.message;
-        empty.style.display = "block";
-        updateNavButtons("root");
+        updateNavButtons(
+          node.id
+        );
+
+
+        /* رفتن به بالای صفحه */
+
+        window.scrollTo(
+          0,
+          0
+        );
+
       }
+
+      catch (error) {
+
+        console.error(
+          "Miniapp render error:",
+          error
+        );
+
+
+        document.getElementById(
+          "title"
+        ).textContent =
+          "📚 کتابخانه";
+
+
+        document.getElementById(
+          "crumb"
+        ).innerHTML =
+          "";
+
+
+        document.getElementById(
+          "content"
+        ).innerHTML =
+          "";
+
+
+        document.getElementById(
+          "buttons"
+        ).innerHTML =
+          "";
+
+
+        empty.textContent =
+          "خطا در دریافت اطلاعات: " +
+          error.message;
+
+
+        empty.style.display =
+          "block";
+
+
+        updateNavButtons(
+          "root"
+        );
+
+      }
+
     }
+
+
+    /* =========================================================
+       بازگشت
+       ========================================================= */
 
     function goBack() {
-      if (historyStack.length > 0) {
-        const previousNodeId = historyStack.pop();
-        render(previousNodeId);
-      } else {
-        render("root");
+
+      if (
+        historyStack.length > 0
+      ) {
+
+        const previousNodeId =
+          historyStack.pop();
+
+
+        render(
+          previousNodeId
+        );
+
       }
+
+      else {
+
+        render(
+          "root"
+        );
+
+      }
+
     }
+
+
+    /* =========================================================
+       رفتن به یک مسیر
+       ========================================================= */
 
     function goTo(nodeId) {
-      const targetId = String(nodeId);
-      if (targetId === "root") {
+
+      const targetId =
+        String(nodeId);
+
+
+      if (
+        targetId === "root"
+      ) {
+
         historyStack = [];
-      } else {
-        const idx = historyStack.indexOf(targetId);
-        if (idx !== -1) {
-          historyStack = historyStack.slice(0, idx);
-        }
+
       }
-      render(targetId);
+
+      else {
+
+        const idx =
+          historyStack.indexOf(
+            targetId
+          );
+
+
+        if (idx !== -1) {
+
+          historyStack =
+            historyStack.slice(
+              0,
+              idx
+            );
+
+        }
+
+      }
+
+
+      render(
+        targetId
+      );
+
     }
 
-    // شروع اولیه
+
+    /* =========================================================
+       شروع
+       ========================================================= */
+
     render("root");
+
   </script>
+
 </body>
 </html>
