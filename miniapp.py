@@ -2,6 +2,7 @@ import json
 import os
 from aiohttp import web
 import mimetypes
+import aiohttp
 
 DB_FILE = "/tmp/database.json"
 
@@ -41,8 +42,12 @@ def load_db():
 
 async def miniapp_file(request):
     """
-    فایل را به صورت Stream به Mini App می‌دهد
-    و از HTTP Range برای ویدیوهای حجیم پشتیبانی می‌کند.
+    ارسال فایل Telegram به Mini App
+    با پشتیبانی از HTTP Range.
+
+    برای جلوگیری از مصرف شدید اینترنت:
+    هر درخواست Range حداکثر PREVIEW_MAX_BYTES بایت
+    از Telegram دریافت می‌کند.
     """
 
     file_id = request.query.get("file_id")
@@ -54,11 +59,12 @@ async def miniapp_file(request):
         )
 
     try:
+
         bot = request.app["bot"]
 
-        # -----------------------------
-        # اطلاعات فایل از Telegram
-        # -----------------------------
+        # =====================================================
+        # گرفتن فایل از Telegram
+        # =====================================================
 
         telegram_file = await bot.get_file(file_id)
 
@@ -70,9 +76,9 @@ async def miniapp_file(request):
                 status=500
             )
 
-        # -----------------------------
-        # filename / MIME
-        # -----------------------------
+        # =====================================================
+        # مشخصات فایل
+        # =====================================================
 
         filename = (
             request.query.get("filename")
@@ -85,13 +91,18 @@ async def miniapp_file(request):
             or "application/octet-stream"
         )
 
-        # -----------------------------
-        # Range
-        # -----------------------------
+        # =====================================================
+        # حداکثر حجم هر درخواست Preview
+        # =====================================================
 
-        range_header = request.headers.get("Range")
+        PREVIEW_MAX_BYTES = 8 * 1024 * 1024
+        # 8 MB
 
-        headers = {
+        # =====================================================
+        # Header خروجی
+        # =====================================================
+
+        base_headers = {
             "Accept-Ranges": "bytes",
             "Content-Type": mime_type,
             "Content-Disposition": (
@@ -100,62 +111,133 @@ async def miniapp_file(request):
             "Cache-Control": "no-cache",
         }
 
-        # -----------------------------
-        # اگر Range نداریم
-        # -----------------------------
+        # =====================================================
+        # Range مرورگر
+        # =====================================================
+
+        range_header = request.headers.get("Range")
+
+        # =====================================================
+        # اگر Range وجود ندارد
+        # =====================================================
 
         if not range_header:
+
+            # برای جلوگیری از دانلود کامل فایل،
+            # فقط ابتدای فایل را ارسال می‌کنیم.
+
+            start = 0
+            end = PREVIEW_MAX_BYTES - 1
+
+            telegram_headers = {
+                "Range": f"bytes={start}-{end}"
+            }
 
             async with aiohttp.ClientSession() as session:
 
                 async with session.get(
-                    file_url
+                    file_url,
+                    headers=telegram_headers
                 ) as response:
 
-                    if response.status != 200:
+                    if response.status not in (200, 206):
 
                         return web.Response(
                             text="خطا در دریافت فایل از تلگرام.",
                             status=response.status
                         )
 
+                    content_range = response.headers.get(
+                        "Content-Range"
+                    )
+
                     content_length = response.headers.get(
                         "Content-Length"
                     )
 
+                    headers = dict(base_headers)
+
+                    if content_range:
+                        headers["Content-Range"] = content_range
+
                     if content_length:
                         headers["Content-Length"] = content_length
 
-                    # Stream کردن فایل
-                    resp = web.StreamResponse(
-                        status=200,
-                        headers=headers
-                    )
+                    # اگر Telegram Range را قبول کرد
+                    if response.status == 206:
 
-                    await resp.prepare(request)
+                        resp = web.StreamResponse(
+                            status=206,
+                            headers=headers
+                        )
 
-                    async for chunk in response.content.iter_chunked(
-                        1024 * 1024
-                    ):
-                        await resp.write(chunk)
+                        await resp.prepare(request)
 
-                    await resp.write_eof()
+                        async for chunk in response.content.iter_chunked(
+                            256 * 1024
+                        ):
 
-                    return resp
+                            await resp.write(chunk)
 
-        # =================================================
-        # Range Request
-        # =================================================
+                        await resp.write_eof()
 
-        # مثال:
-        # Range: bytes=0-999999
+                        return resp
+
+                    # اگر Telegram کل فایل را برگرداند،
+                    # بیشتر از Preview را به کاربر نمی‌دهیم.
+                    if response.status == 200:
+
+                        resp = web.StreamResponse(
+                            status=200,
+                            headers=headers
+                        )
+
+                        await resp.prepare(request)
+
+                        remaining = PREVIEW_MAX_BYTES
+
+                        while remaining > 0:
+
+                            chunk = await response.content.read(
+                                min(
+                                    256 * 1024,
+                                    remaining
+                                )
+                            )
+
+                            if not chunk:
+                                break
+
+                            await resp.write(chunk)
+
+                            remaining -= len(chunk)
+
+                        await resp.write_eof()
+
+                        return resp
+
+        # =====================================================
+        # Parse Range
+        # =====================================================
+
+        if not range_header.startswith("bytes="):
+
+            return web.Response(
+                text="Range نامعتبر است.",
+                status=416
+            )
+
+        range_value = range_header[6:].strip()
+
+        # Multiple Range
+        if "," in range_value:
+
+            return web.Response(
+                text="Multiple ranges پشتیبانی نمی‌شود.",
+                status=416
+            )
 
         try:
-
-            range_value = range_header.replace(
-                "bytes=",
-                ""
-            ).strip()
 
             start_str, end_str = range_value.split(
                 "-",
@@ -164,11 +246,13 @@ async def miniapp_file(request):
 
             start = int(start_str)
 
-            end = (
-                int(end_str)
-                if end_str
-                else None
-            )
+            if start < 0:
+                raise ValueError()
+
+            if end_str:
+                requested_end = int(end_str)
+            else:
+                requested_end = start + PREVIEW_MAX_BYTES - 1
 
         except Exception:
 
@@ -177,13 +261,27 @@ async def miniapp_file(request):
                 status=416
             )
 
-        # -----------------------------
-        # Range را مستقیماً به Telegram
-        # منتقل می‌کنیم
-        # -----------------------------
+        # =====================================================
+        # محدود کردن Range
+        # =====================================================
+
+        requested_end = min(
+            requested_end,
+            start + PREVIEW_MAX_BYTES - 1
+        )
+
+        end = requested_end
+
+        print(
+            f"🎬 MINIAPP RANGE: {start}-{end}"
+        )
+
+        # =====================================================
+        # درخواست محدود به Telegram
+        # =====================================================
 
         telegram_headers = {
-            "Range": f"bytes={start}-{end if end is not None else ''}"
+            "Range": f"bytes={start}-{end}"
         }
 
         async with aiohttp.ClientSession() as session:
@@ -193,46 +291,90 @@ async def miniapp_file(request):
                 headers=telegram_headers
             ) as response:
 
-                if response.status not in (200, 206):
+                # =================================================
+                # Telegram Range
+                # =================================================
 
-                    return web.Response(
-                        text="خطا در دریافت بخش فایل.",
-                        status=response.status
+                if response.status == 206:
+
+                    headers = dict(base_headers)
+
+                    content_range = response.headers.get(
+                        "Content-Range"
                     )
 
-                content_range = response.headers.get(
-                    "Content-Range"
+                    content_length = response.headers.get(
+                        "Content-Length"
+                    )
+
+                    if content_range:
+                        headers["Content-Range"] = content_range
+
+                    if content_length:
+                        headers["Content-Length"] = content_length
+
+                    resp = web.StreamResponse(
+                        status=206,
+                        headers=headers
+                    )
+
+                    await resp.prepare(request)
+
+                    async for chunk in response.content.iter_chunked(
+                        256 * 1024
+                    ):
+
+                        await resp.write(chunk)
+
+                    await resp.write_eof()
+
+                    return resp
+
+                # =================================================
+                # Telegram Range را قبول نکرد
+                # =================================================
+
+                if response.status == 200:
+
+                    print(
+                        "⚠️ Telegram returned 200 instead of 206"
+                    )
+
+                    headers = dict(base_headers)
+
+                    resp = web.StreamResponse(
+                        status=200,
+                        headers=headers
+                    )
+
+                    await resp.prepare(request)
+
+                    remaining = PREVIEW_MAX_BYTES
+
+                    while remaining > 0:
+
+                        chunk = await response.content.read(
+                            min(
+                                256 * 1024,
+                                remaining
+                            )
+                        )
+
+                        if not chunk:
+                            break
+
+                        await resp.write(chunk)
+
+                        remaining -= len(chunk)
+
+                    await resp.write_eof()
+
+                    return resp
+
+                return web.Response(
+                    text="خطا در دریافت فایل از تلگرام.",
+                    status=response.status
                 )
-
-                content_length = response.headers.get(
-                    "Content-Length"
-                )
-
-                if content_range:
-                    headers["Content-Range"] = content_range
-
-                if content_length:
-                    headers["Content-Length"] = content_length
-
-                # -----------------------------
-                # پاسخ 206 Partial Content
-                # -----------------------------
-
-                resp = web.StreamResponse(
-                    status=206,
-                    headers=headers
-                )
-
-                await resp.prepare(request)
-
-                async for chunk in response.content.iter_chunked(
-                    1024 * 1024
-                ):
-                    await resp.write(chunk)
-
-                await resp.write_eof()
-
-                return resp
 
     except Exception as e:
 
