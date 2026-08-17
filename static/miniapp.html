@@ -2,11 +2,22 @@
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
   <title>کتابخانه مجازی</title>
+
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Tahoma, "Segoe UI", sans-serif; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Tahoma, "Segoe UI", sans-serif;
+    }
+
     body {
       background: var(--tg-theme-bg-color, #f0f2f5);
       color: var(--tg-theme-text-color, #1c1e21);
@@ -14,40 +25,72 @@
       min-height: 100vh;
     }
 
-    .header { text-align: center; margin: 8px 0 18px; }
-    .header h1 { font-size: 1.35rem; margin-bottom: 6px; }
-    .crumb { font-size: .8rem; color: var(--tg-hint-color, #888); line-height: 1.8; }
-    .crumb a { color: var(--tg-link-color, #2481cc); text-decoration: none; cursor: pointer; }
+    .header {
+      text-align: center;
+      margin: 8px 0 18px;
+    }
+
+    .header h1 {
+      font-size: 1.35rem;
+      margin-bottom: 6px;
+    }
+
+    .crumb {
+      font-size: 0.8rem;
+      color: var(--tg-theme-hint-color, #888);
+      line-height: 1.8;
+    }
+
+    .crumb a {
+      color: var(--tg-theme-link-color, #2481cc);
+      text-decoration: none;
+      cursor: pointer;
+    }
 
     .content-box {
       background: var(--tg-theme-secondary-bg-color, #ffffff);
       border-radius: 12px;
       padding: 12px;
       margin-bottom: 16px;
-      border: 1px solid var(--tg-hint-color, #ddd);
+      border: 1px solid var(--tg-theme-hint-color, #ddd);
     }
-    .content-box h3 { font-size: .95rem; margin-bottom: 8px; }
+
+    .content-box h3 {
+      font-size: 0.95rem;
+      margin-bottom: 8px;
+    }
+
     .text-item {
       background: var(--tg-theme-bg-color, #f7f7f7);
       border-radius: 8px;
-      padding: 8px 10px;
-      margin: 4px 0;
-      font-size: .9rem;
+      padding: 10px;
+      margin: 6px 0;
+      font-size: 0.9rem;
       white-space: pre-wrap;
       word-break: break-word;
-    }
-    .stat {
-      display: inline-block;
-      background: var(--tg-hint-color, #eee);
-      color: var(--tg-theme-text-color, #333);
-      padding: 4px 10px;
-      border-radius: 8px;
-      margin: 3px;
-      font-size: .8rem;
+      line-height: 1.8;
     }
 
-    .row { display: flex; gap: 8px; margin-bottom: 8px; }
-    .row .btn { flex: 1; }
+    .file-title {
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .file-caption {
+      font-size: 0.82rem;
+      opacity: 0.8;
+      white-space: pre-wrap;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .row .btn {
+      flex: 1;
+    }
 
     .btn {
       display: flex;
@@ -55,54 +98,78 @@
       justify-content: space-between;
       width: 100%;
       border: none;
-      padding: 14px 14px;
+      padding: 14px;
       border-radius: 12px;
       color: #fff;
-      font-size: .95rem;
+      font-size: 0.95rem;
       font-weight: 600;
       text-align: right;
       cursor: pointer;
-      transition: transform .08s ease, filter .1s ease;
+      transition: transform 0.08s ease, filter 0.1s ease;
       min-height: 52px;
     }
-    .btn:active { transform: scale(.97); filter: brightness(.92); }
-    .btn .arrow { opacity: .85; font-size: 1.1rem; }
+
+    .btn:active {
+      transform: scale(0.97);
+      filter: brightness(0.92);
+    }
+
+    .btn .arrow {
+      opacity: 0.85;
+      font-size: 1.1rem;
+    }
+
     .btn .count {
-      font-size: .7rem;
-      background: rgba(0,0,0,.2);
+      font-size: 0.7rem;
+      background: rgba(0, 0, 0, 0.2);
       border-radius: 20px;
       padding: 2px 8px;
       font-weight: 400;
     }
 
     /* رنگ‌ها مطابق استایل‌های ربات */
-    .green { background: linear-gradient(135deg, #2ecc71, #27ae60); }
-    .blue  { background: linear-gradient(135deg, #3498db, #2980b9); }
-    .red   { background: linear-gradient(135deg, #e74c3c, #c0392b); }
-    .none  { background: var(--tg-theme-button-color, #2481cc); }
+    .green {
+      background: linear-gradient(135deg, #2ecc71, #27ae60);
+    }
+
+    .blue {
+      background: linear-gradient(135deg, #3498db, #2980b9);
+    }
+
+    .red {
+      background: linear-gradient(135deg, #e74c3c, #c0392b);
+    }
+
+    .none {
+      background: var(--tg-theme-button-color, #2481cc);
+    }
 
     .footer {
       display: flex;
       gap: 10px;
       margin-top: 22px;
     }
+
     .footer button {
       flex: 1;
       padding: 12px;
-      border: none;
+      border: 1px solid var(--tg-theme-hint-color, #ddd);
       border-radius: 10px;
-      font-size: .95rem;
+      font-size: 0.95rem;
       cursor: pointer;
       background: var(--tg-theme-secondary-bg-color, #fff);
       color: var(--tg-theme-text-color, #222);
-      border: 1px solid var(--tg-hint-color, #ddd);
     }
 
-    .empty { color: var(--tg-hint-color, #999); text-align: center; padding: 24px; }
+    .empty {
+      color: var(--tg-theme-hint-color, #999);
+      text-align: center;
+      padding: 24px;
+    }
   </style>
 </head>
-<body>
 
+<body>
   <div class="header">
     <h1 id="title">📚 کتابخانه</h1>
     <div class="crumb" id="crumb"></div>
@@ -110,161 +177,256 @@
 
   <div id="content"></div>
   <div id="buttons"></div>
-  <p id="empty" class="empty" style="display:none;">این پوشه خالی است.</p>
+
+  <p id="empty" class="empty" style="display: none;">
+    این پوشه خالی است.
+  </p>
 
   <div class="footer">
-    <button onclick="goBack()">🔙 بازگشت</button>
-    <button onclick="goTo('root')">🏠 خانه</button>
+    <button type="button" onclick="goBack()">🔙 بازگشت</button>
+    <button type="button" onclick="goTo('root')">🏠 خانه</button>
   </div>
 
-<script>
-  const tg = window.Telegram?.WebApp;
-  if (tg) { tg.ready(); tg.expand(); }
+  <script>
+    const tg = window.Telegram?.WebApp;
 
-  const historyStack = [];
-
-async function fetchNode(nodeId) {
-  const res = await fetch(
-    '/miniapp-data?node=' + encodeURIComponent(nodeId),
-    { cache: 'no-store' }
-  );
-
-  const response = await res.json();
-
-  if (!res.ok || response.ok === false) {
-    throw new Error(response.error || 'خطا در دریافت اطلاعات');
-  }
-
-  // backend فعلی پاسخ را داخل data برمی‌گرداند
-  return response.data || response;
-}
-
-  function applyStyle(el, style) {
-    if (style && style.startsWith('#')) {   // رنگ هگز دلخواه
-      el.style.background = style;
-      return;
-    }
-    el.classList.add(style || 'none');
-  }
-
-  function renderCrumb(node) {
-    const crumb = document.getElementById('crumb');
-    crumb.innerHTML = '';
-    (node.breadcrumb || []).forEach((b, i) => {
-      const a = document.createElement('a');
-      a.textContent = b.name;
-      a.onclick = () => goTo(b.id);
-      crumb.appendChild(a);
-      if (i < (node.breadcrumb.length - 1)) {
-        crumb.appendChild(document.createTextNode(' › '));
-      }
-    });
-  }
-
-  function renderContents(contents) {
-    const div = document.getElementById('content');
-    div.innerHTML = '';
-
-    const texts = contents?.texts || [];
-    const media = contents?.media || {};
-
-    if (!texts.length && !Object.keys(media).length) return;
-
-    const box = document.createElement('div');
-    box.className = 'content-box';
-
-    if (texts.length) {
-      box.innerHTML += '<h3>📄 متن</h3>';
-      texts.forEach(t => {
-        const p = document.createElement('div');
-        p.className = 'text-item';
-        p.textContent = t;
-        box.appendChild(p);
-      });
+    if (tg) {
+      tg.ready();
+      tg.expand();
     }
 
-    const labels = {
-      photo: '📷 عکس', video: '🎬 ویدیو', document: '📁 فایل',
-      audio: '🎵 صدا', voice: '🎤 ویس', animation: '✨ گیف',
-      sticker: '🏷 استیکر', video_note: '⭕️ ویدیو مسیج'
+    const historyStack = [];
+
+    const contentIcons = {
+      photo: "📷",
+      video: "🎬",
+      document: "📁",
+      audio: "🎵",
+      voice: "🎤",
+      animation: "✨",
+      sticker: "🏷️",
+      video_note: "⭕️",
+      contact: "👤",
+      location: "📍"
     };
 
-    const mediaEntries = Object.entries(media);
-    if (mediaEntries.length) {
-      box.innerHTML += '<h3>📎 فایل‌ها</h3>';
-      mediaEntries.forEach(([k, v]) => {
-        const s = document.createElement('span');
-        s.className = 'stat';
-        s.textContent = `${labels[k] || k}: ${v}`;
-        box.appendChild(s);
-      });
-    }
-
-    div.appendChild(box);
-  }
-
-  function renderButtons(node) {
-    const div = document.getElementById('buttons');
-    div.innerHTML = '';
-
-    (node.rows || []).forEach(rowChildren => {
-      const row = document.createElement('div');
-      row.className = 'row';
-
-      rowChildren.forEach(c => {
-        const b = document.createElement('button');
-        b.className = 'btn';
-        applyStyle(b, c.style);
-
-        let inner = `<span>${c.name}</span>`;
-        if (c.content_count) {
-          inner += `<span class="count">${c.content_count} 📎</span>`;
-        } else if (c.has_children) {
-          inner += `<span class="arrow">▸</span>`;
+    async function fetchNode(nodeId) {
+      const response = await fetch(
+        "/miniapp-data?node=" + encodeURIComponent(nodeId),
+        {
+          cache: "no-store"
         }
-        b.innerHTML = inner;
+      );
 
-        b.onclick = () => {
-          historyStack.push(node.id);
-          render(c.id);
-        };
-        row.appendChild(b);
-      });
+      let result;
 
-      div.appendChild(row);
-    });
+      try {
+        result = await response.json();
+      } catch (error) {
+        throw new Error("پاسخ سرور معتبر نیست.");
+      }
 
-    document.getElementById('empty').style.display =
-      (node.rows && node.rows.length) ? 'none' : 'block';
-  }
+      if (!response.ok || result.ok === false) {
+        throw new Error(result.error || "خطا در دریافت اطلاعات کتابخانه.");
+      }
 
-async function render(nodeId) {
-  try {
-    const node = await fetchNode(nodeId);
+      /*
+        Backend فعلی پاسخ را به این شکل برمی‌گرداند:
 
-    if (!node || !node.id) {
-      throw new Error('داده‌ی پوشه دریافت نشد');
+        {
+          "ok": true,
+          "data": {
+            "id": "...",
+            "name": "...",
+            "rows": [...]
+          }
+        }
+      */
+      return result.data || result;
     }
 
-    document.getElementById('title').textContent =
-      node.name || 'کتابخانه';
+    function applyStyle(element, style) {
+      if (style && style.startsWith("#")) {
+        element.style.background = style;
+        return;
+      }
 
-    renderCrumb(node);
-    renderContents(node.contents);
-    renderButtons(node);
+      element.classList.add(style || "none");
+    }
 
-    window.scrollTo(0, 0);
-  } catch (error) {
-    console.error('Miniapp render error:', error);
+    function renderCrumb(node) {
+      const crumb = document.getElementById("crumb");
+      crumb.innerHTML = "";
 
-    document.getElementById('buttons').innerHTML = '';
-    document.getElementById('content').innerHTML = '';
+      const breadcrumb = node.breadcrumb || [];
 
-    const empty = document.getElementById('empty');
-    empty.textContent = 'خطا در دریافت اطلاعات کتابخانه.';
-    empty.style.display = 'block';
-  }
-}
-</script>
+      breadcrumb.forEach((item, index) => {
+        const link = document.createElement("a");
+
+        link.textContent = item.name || "بدون نام";
+        link.onclick = () => goTo(item.id);
+
+        crumb.appendChild(link);
+
+        if (index < breadcrumb.length - 1) {
+          crumb.appendChild(document.createTextNode(" › "));
+        }
+      });
+    }
+
+    function renderContents(contents) {
+      const contentDiv = document.getElementById("content");
+      contentDiv.innerHTML = "";
+
+      if (!Array.isArray(contents) || contents.length === 0) {
+        return;
+      }
+
+      const box = document.createElement("div");
+      box.className = "content-box";
+
+      const heading = document.createElement("h3");
+      heading.textContent = "📂 محتوای این بخش";
+      box.appendChild(heading);
+
+      contents.forEach((item) => {
+        if (!item || typeof item !== "object") {
+          return;
+        }
+
+        const itemDiv = document.createElement("div");
+        itemDiv.className = "text-item";
+
+        if (item.type === "text") {
+          itemDiv.textContent = item.text || "";
+          box.appendChild(itemDiv);
+          return;
+        }
+
+        const icon = contentIcons[item.type] || "📎";
+
+        const title = document.createElement("div");
+        title.className = "file-title";
+
+        const fileName = item.file_name || item.filename || "";
+        const typeName = item.type || "file";
+
+        title.textContent = `${icon} ${fileName || "فایل " + typeName}`;
+        itemDiv.appendChild(title);
+
+        if (item.caption) {
+          const caption = document.createElement("div");
+          caption.className = "file-caption";
+          caption.textContent = item.caption;
+          itemDiv.appendChild(caption);
+        }
+
+        box.appendChild(itemDiv);
+      });
+
+      contentDiv.appendChild(box);
+    }
+
+    function renderButtons(node) {
+      const buttonsDiv = document.getElementById("buttons");
+      buttonsDiv.innerHTML = "";
+
+      const rows = Array.isArray(node.rows) ? node.rows : [];
+
+      rows.forEach((rowChildren) => {
+        const row = document.createElement("div");
+        row.className = "row";
+
+        rowChildren.forEach((child) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "btn";
+
+          applyStyle(button, child.style);
+
+          const name = document.createElement("span");
+          name.textContent = child.name || "بدون نام";
+          button.appendChild(name);
+
+          if (child.content_count) {
+            const count = document.createElement("span");
+            count.className = "count";
+            count.textContent = `${child.content_count} 📎`;
+            button.appendChild(count);
+          } else if (child.has_children) {
+            const arrow = document.createElement("span");
+            arrow.className = "arrow";
+            arrow.textContent = "▸";
+            button.appendChild(arrow);
+          }
+
+          button.onclick = () => {
+            historyStack.push(node.id);
+            render(child.id);
+          };
+
+          row.appendChild(button);
+        });
+
+        buttonsDiv.appendChild(row);
+      });
+
+      const empty = document.getElementById("empty");
+
+      const hasFolders = rows.length > 0;
+      const hasContents =
+        Array.isArray(node.contents) && node.contents.length > 0;
+
+      empty.textContent = "این پوشه خالی است.";
+      empty.style.display = (!hasFolders && !hasContents) ? "block" : "none";
+    }
+
+    async function render(nodeId) {
+      const empty = document.getElementById("empty");
+
+      try {
+        empty.style.display = "none";
+
+        const node = await fetchNode(nodeId);
+
+        if (!node || !node.id) {
+          throw new Error("داده‌ی پوشه دریافت نشد.");
+        }
+
+        document.getElementById("title").textContent =
+          node.name || "📚 کتابخانه";
+
+        renderCrumb(node);
+        renderContents(node.contents);
+        renderButtons(node);
+
+        window.scrollTo(0, 0);
+      } catch (error) {
+        console.error("Miniapp render error:", error);
+
+        document.getElementById("title").textContent = "📚 کتابخانه";
+        document.getElementById("crumb").innerHTML = "";
+        document.getElementById("content").innerHTML = "";
+        document.getElementById("buttons").innerHTML = "";
+
+        empty.textContent =
+          "خطا در دریافت اطلاعات کتابخانه: " + error.message;
+
+        empty.style.display = "block";
+      }
+    }
+
+    function goBack() {
+      const previousNodeId = historyStack.pop();
+      render(previousNodeId || "root");
+    }
+
+    function goTo(nodeId) {
+      historyStack.length = 0;
+      render(nodeId);
+    }
+
+    render("root");
+  </script>
 </body>
 </html>
