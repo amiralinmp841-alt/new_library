@@ -16,6 +16,7 @@
       margin: 0;
       padding: 0;
       font-family: Tahoma, "Segoe UI", sans-serif;
+      -webkit-tap-highlight-color: transparent;
     }
 
     body {
@@ -23,48 +24,55 @@
       color: var(--tg-theme-text-color, #1c1e21);
       padding: 14px;
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
     .header {
       text-align: center;
-      margin: 8px 0 18px;
+      margin: 8px 0 16px;
     }
 
     .header h1 {
-      font-size: 1.35rem;
+      font-size: 1.3rem;
       margin-bottom: 6px;
+      word-break: break-word;
     }
 
     .crumb {
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       color: var(--tg-theme-hint-color, #888);
       line-height: 1.8;
+      word-break: break-word;
     }
 
     .crumb a {
       color: var(--tg-theme-link-color, #2481cc);
       text-decoration: none;
       cursor: pointer;
+      font-weight: 500;
     }
 
     .content-box {
       background: var(--tg-theme-secondary-bg-color, #ffffff);
       border-radius: 12px;
-      padding: 12px;
+      padding: 14px;
       margin-bottom: 16px;
-      border: 1px solid var(--tg-theme-hint-color, #ddd);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
     }
 
     .content-box h3 {
       font-size: 0.95rem;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
+      color: var(--tg-theme-hint-color, #666);
     }
 
     .text-item {
       background: var(--tg-theme-bg-color, #f7f7f7);
       border-radius: 8px;
-      padding: 10px;
-      margin: 6px 0;
+      padding: 12px;
+      margin: 8px 0;
       font-size: 0.9rem;
       white-space: pre-wrap;
       word-break: break-word;
@@ -72,14 +80,19 @@
     }
 
     .file-title {
-      font-weight: bold;
+      font-weight: 600;
       margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     .file-caption {
-      font-size: 0.82rem;
-      opacity: 0.8;
+      font-size: 0.85rem;
+      opacity: 0.85;
       white-space: pre-wrap;
+      margin-top: 4px;
+      line-height: 1.6;
     }
 
     .row {
@@ -98,7 +111,7 @@
       justify-content: space-between;
       width: 100%;
       border: none;
-      padding: 14px;
+      padding: 14px 16px;
       border-radius: 12px;
       color: #fff;
       font-size: 0.95rem;
@@ -110,80 +123,77 @@
     }
 
     .btn:active {
-      transform: scale(0.97);
+      transform: scale(0.98);
       filter: brightness(0.92);
     }
 
     .btn .arrow {
-      opacity: 0.85;
+      opacity: 0.8;
       font-size: 1.1rem;
     }
 
     .btn .count {
-      font-size: 0.7rem;
+      font-size: 0.75rem;
       background: rgba(0, 0, 0, 0.2);
       border-radius: 20px;
       padding: 2px 8px;
       font-weight: 400;
     }
 
-    /* رنگ‌ها مطابق استایل‌های ربات */
-    .green {
-      background: linear-gradient(135deg, #2ecc71, #27ae60);
-    }
-
-    .blue {
-      background: linear-gradient(135deg, #3498db, #2980b9);
-    }
-
-    .red {
-      background: linear-gradient(135deg, #e74c3c, #c0392b);
-    }
-
-    .none {
-      background: var(--tg-theme-button-color, #2481cc);
-    }
+    /* پالت رنگ‌ها */
+    .green { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+    .blue { background: linear-gradient(135deg, #3498db, #2980b9); }
+    .red { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+    .orange { background: linear-gradient(135deg, #e67e22, #d35400); }
+    .purple { background: linear-gradient(135deg, #9b59b6, #8e44ad); }
+    .none { background: var(--tg-theme-button-color, #2481cc); }
 
     .footer {
       display: flex;
       gap: 10px;
-      margin-top: 22px;
+      margin-top: auto;
+      padding-top: 18px;
     }
 
     .footer button {
       flex: 1;
       padding: 12px;
-      border: 1px solid var(--tg-theme-hint-color, #ddd);
+      border: 1px solid rgba(0, 0, 0, 0.1);
       border-radius: 10px;
       font-size: 0.95rem;
+      font-weight: 500;
       cursor: pointer;
       background: var(--tg-theme-secondary-bg-color, #fff);
       color: var(--tg-theme-text-color, #222);
+      transition: background 0.1s;
+    }
+
+    .footer button:active {
+      background: var(--tg-theme-bg-color, #eee);
     }
 
     .empty {
       color: var(--tg-theme-hint-color, #999);
       text-align: center;
-      padding: 24px;
+      padding: 30px 10px;
+      font-size: 0.95rem;
     }
   </style>
 </head>
 
 <body>
   <div class="header">
-    <h1 id="title">📚 کتابخانه</h1>
+    <h1 id="title">📚 در حال دریافت...</h1>
     <div class="crumb" id="crumb"></div>
   </div>
 
   <div id="content"></div>
   <div id="buttons"></div>
 
-  <p id="empty" class="empty" style="display: none;">
-    این پوشه خالی است.
-  </p>
+  <p id="empty" class="empty" style="display: none;">این بخش خالی است.</p>
 
   <div class="footer">
-    <button type="button" onclick="goBack()">🔙 بازگشت</button>
+    <button type="button" id="btn-back" onclick="goBack()">🔙 بازگشت</button>
     <button type="button" onclick="goTo('root')">🏠 خانه</button>
   </div>
 
@@ -193,9 +203,12 @@
     if (tg) {
       tg.ready();
       tg.expand();
+      if (tg.BackButton) {
+        tg.BackButton.onClick(() => goBack());
+      }
     }
 
-    const historyStack = [];
+    let historyStack = [];
 
     const contentIcons = {
       photo: "📷",
@@ -213,45 +226,52 @@
     async function fetchNode(nodeId) {
       const response = await fetch(
         "/miniapp-data?node=" + encodeURIComponent(nodeId),
-        {
-          cache: "no-store"
-        }
+        { cache: "no-store" }
       );
 
       let result;
-
       try {
         result = await response.json();
       } catch (error) {
-        throw new Error("پاسخ سرور معتبر نیست.");
+        throw new Error("پاسخ سرور نامعتبر است.");
       }
 
       if (!response.ok || result.ok === false) {
-        throw new Error(result.error || "خطا در دریافت اطلاعات کتابخانه.");
+        throw new Error(result.error || "خطا در دریافت اطلاعات.");
       }
 
-      /*
-        Backend فعلی پاسخ را به این شکل برمی‌گرداند:
-
-        {
-          "ok": true,
-          "data": {
-            "id": "...",
-            "name": "...",
-            "rows": [...]
-          }
-        }
-      */
       return result.data || result;
     }
 
     function applyStyle(element, style) {
-      if (style && style.startsWith("#")) {
+      if (!style || style === "none") {
+        element.classList.add("none");
+        return;
+      }
+      if (typeof style === "string" && style.startsWith("#")) {
         element.style.background = style;
         return;
       }
+      const safeClass = String(style).replace(/[^a-zA-Z0-9_-]/g, "");
+      element.classList.add(safeClass || "none");
+    }
 
-      element.classList.add(style || "none");
+    function updateNavButtons(currentNodeId) {
+      const isRoot = currentNodeId === "root" || historyStack.length === 0;
+      
+      const backBtn = document.getElementById("btn-back");
+      if (backBtn) {
+        backBtn.style.opacity = isRoot ? "0.5" : "1";
+        backBtn.disabled = isRoot;
+      }
+
+      if (tg?.BackButton) {
+        if (isRoot) {
+          tg.BackButton.hide();
+        } else {
+          tg.BackButton.show();
+        }
+      }
     }
 
     function renderCrumb(node) {
@@ -262,9 +282,11 @@
 
       breadcrumb.forEach((item, index) => {
         const link = document.createElement("a");
-
         link.textContent = item.name || "بدون نام";
-        link.onclick = () => goTo(item.id);
+        link.onclick = (e) => {
+          e.preventDefault();
+          goTo(item.id);
+        };
 
         crumb.appendChild(link);
 
@@ -290,9 +312,7 @@
       box.appendChild(heading);
 
       contents.forEach((item) => {
-        if (!item || typeof item !== "object") {
-          return;
-        }
+        if (!item || typeof item !== "object") return;
 
         const itemDiv = document.createElement("div");
         itemDiv.className = "text-item";
@@ -304,17 +324,16 @@
         }
 
         const icon = contentIcons[item.type] || "📎";
-
         const title = document.createElement("div");
         title.className = "file-title";
 
-        const fileName = item.file_name || item.filename || "";
-        const typeName = item.type || "file";
+        const fileName = item.file_name || item.filename || item.caption || "";
+        const typeName = item.type || "فایل";
 
         title.textContent = `${icon} ${fileName || "فایل " + typeName}`;
         itemDiv.appendChild(title);
 
-        if (item.caption) {
+        if (item.caption && item.caption !== fileName) {
           const caption = document.createElement("div");
           caption.className = "file-caption";
           caption.textContent = item.caption;
@@ -372,10 +391,8 @@
       });
 
       const empty = document.getElementById("empty");
-
       const hasFolders = rows.length > 0;
-      const hasContents =
-        Array.isArray(node.contents) && node.contents.length > 0;
+      const hasContents = Array.isArray(node.contents) && node.contents.length > 0;
 
       empty.textContent = "این پوشه خالی است.";
       empty.style.display = (!hasFolders && !hasContents) ? "block" : "none";
@@ -386,19 +403,17 @@
 
       try {
         empty.style.display = "none";
-
         const node = await fetchNode(nodeId);
 
         if (!node || !node.id) {
-          throw new Error("داده‌ی پوشه دریافت نشد.");
+          throw new Error("داده‌های پوشه معتبر نیستند.");
         }
 
-        document.getElementById("title").textContent =
-          node.name || "📚 کتابخانه";
-
+        document.getElementById("title").textContent = node.name || "📚 کتابخانه";
         renderCrumb(node);
         renderContents(node.contents);
         renderButtons(node);
+        updateNavButtons(node.id);
 
         window.scrollTo(0, 0);
       } catch (error) {
@@ -409,23 +424,35 @@
         document.getElementById("content").innerHTML = "";
         document.getElementById("buttons").innerHTML = "";
 
-        empty.textContent =
-          "خطا در دریافت اطلاعات کتابخانه: " + error.message;
-
+        empty.textContent = "خطا در دریافت اطلاعات: " + error.message;
         empty.style.display = "block";
+        updateNavButtons("root");
       }
     }
 
     function goBack() {
-      const previousNodeId = historyStack.pop();
-      render(previousNodeId || "root");
+      if (historyStack.length > 0) {
+        const previousNodeId = historyStack.pop();
+        render(previousNodeId);
+      } else {
+        render("root");
+      }
     }
 
     function goTo(nodeId) {
-      historyStack.length = 0;
-      render(nodeId);
+      const targetId = String(nodeId);
+      if (targetId === "root") {
+        historyStack = [];
+      } else {
+        const idx = historyStack.indexOf(targetId);
+        if (idx !== -1) {
+          historyStack = historyStack.slice(0, idx);
+        }
+      }
+      render(targetId);
     }
 
+    // شروع اولیه
     render("root");
   </script>
 </body>
