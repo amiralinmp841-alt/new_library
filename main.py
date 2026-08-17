@@ -53,7 +53,7 @@ from smart_search import smart_search
 from html import escape
 from telegram.ext import MessageReactionHandler
 from telegram import MessageReactionUpdated
-from miniapp import get_node_json                  # فایل جدید
+from miniapp import miniapp_data
 
 def delete_node_recursive(db, node_id):
     # اگر نود وجود نداشت
