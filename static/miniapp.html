@@ -123,10 +123,21 @@
 
   const historyStack = [];
 
-  async function fetchNode(nodeId) {
-    const res = await fetch('/miniapp-data?node=' + encodeURIComponent(nodeId));
-    return res.json();
+async function fetchNode(nodeId) {
+  const res = await fetch(
+    '/miniapp-data?node=' + encodeURIComponent(nodeId),
+    { cache: 'no-store' }
+  );
+
+  const response = await res.json();
+
+  if (!res.ok || response.ok === false) {
+    throw new Error(response.error || 'خطا در دریافت اطلاعات');
   }
+
+  // backend فعلی پاسخ را داخل data برمی‌گرداند
+  return response.data || response;
+}
 
   function applyStyle(el, style) {
     if (style && style.startsWith('#')) {   // رنگ هگز دلخواه
@@ -227,30 +238,33 @@
       (node.rows && node.rows.length) ? 'none' : 'block';
   }
 
-  async function render(nodeId) {
+async function render(nodeId) {
+  try {
     const node = await fetchNode(nodeId);
-    if (!node || node.error) {
-      document.getElementById('empty').style.display = 'block';
-      return;
+
+    if (!node || !node.id) {
+      throw new Error('داده‌ی پوشه دریافت نشد');
     }
-    document.getElementById('title').textContent = node.name;
+
+    document.getElementById('title').textContent =
+      node.name || 'کتابخانه';
+
     renderCrumb(node);
     renderContents(node.contents);
     renderButtons(node);
+
     window.scrollTo(0, 0);
-  }
+  } catch (error) {
+    console.error('Miniapp render error:', error);
 
-  function goBack() {
-    const prev = historyStack.pop();
-    render(prev || 'root');
-  }
+    document.getElementById('buttons').innerHTML = '';
+    document.getElementById('content').innerHTML = '';
 
-  function goTo(id) {
-    historyStack.length = 0;
-    render(id);
+    const empty = document.getElementById('empty');
+    empty.textContent = 'خطا در دریافت اطلاعات کتابخانه.';
+    empty.style.display = 'block';
   }
-
-  render('root');
+}
 </script>
 </body>
 </html>
