@@ -6354,12 +6354,8 @@ async def main():
     static_html = os.path.join(os.path.dirname(__file__), "static", "miniapp.html")
     webapp.router.add_get("/miniapp", lambda r: web.FileResponse(static_html))
 
-    async def miniapp_data_handler(request):
-        node_id = request.query.get("node", "root")
-        info = get_node_json(node_id)
-        return web.json_response(info or {"error": "node_not_found"})
-
-    webapp.router.add_get("/miniapp-data", miniapp_data_handler)
+    # مستقیماً تابع ایمپورت‌شده از miniapp.py را قرار دهید:
+    webapp.router.add_get("/miniapp-data", miniapp_data)
     # ====================
 
     runner = web.AppRunner(webapp)
