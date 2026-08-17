@@ -1,40 +1,13 @@
 import json
-import os
 from aiohttp import web
 
-
-DB_FILE = "/tmp/database.json"
-
-
-def load_db():
-    """دریافت دیتابیس مشترک با ربات."""
-
-    try:
-        if not os.path.exists(DB_FILE):
-            print(f"❌ Miniapp DB not found: {DB_FILE}")
-            return {}
-
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if not isinstance(data, dict):
-            print("❌ Miniapp database is not a dictionary.")
-            return {}
-
-        return data
-
-    except json.JSONDecodeError as e:
-        print(f"❌ Miniapp database JSON error: {e}")
-        return {}
-
-    except Exception as e:
-        print(f"❌ Miniapp load_db error: {repr(e)}")
-        return {}
+# مهم:
+# این تابع باید با دیتابیس اصلی ربات کار کند.
+# اگر load_db در main.py است، از همان استفاده می‌کنیم.
+from main import load_db
 
 
 def get_style(node):
-    """تعیین استایل/رنگ نود."""
-
     raw_style = (
         node.get("color")
         or node.get("style")
@@ -46,12 +19,6 @@ def get_style(node):
 
 
 def get_rows(node):
-    """
-    ساخت ردیف‌های دکمه‌ها.
-    اگر layout تعریف شده باشد، از همان استفاده می‌شود.
-    در غیر این صورت بر اساس row_count تقسیم می‌شود.
-    """
-
     children_ids = [
         str(cid)
         for cid in node.get("children", [])
@@ -59,14 +26,16 @@ def get_rows(node):
 
     layout = node.get("layout")
 
-    # اگر layout دستی وجود داشته باشد
     if isinstance(layout, list) and layout:
+
         cleaned = []
 
         child_set = set(children_ids)
 
         for row in layout:
+
             if isinstance(row, list):
+
                 new_row = [
                     str(cid)
                     for cid in row
@@ -79,7 +48,6 @@ def get_rows(node):
         if cleaned:
             return cleaned
 
-    # در غیر این صورت row_count
     try:
         n = int(node.get("row_count", 2))
 
@@ -96,17 +64,6 @@ def get_rows(node):
 
 
 def serialize_contents(contents):
-    """
-    محتواها را برای Mini App آماده می‌کند.
-
-    عمداً تمام فیلدهای content حفظ می‌شوند
-    تا اطلاعاتی مثل:
-    file_id
-    media_group_id
-    caption
-    entities
-    و سایر فیلدهای دیتابیس حذف نشوند.
-    """
 
     result = []
 
@@ -115,14 +72,12 @@ def serialize_contents(contents):
         if not isinstance(item, dict):
             continue
 
-        # کپی کامل content
+        # کل اطلاعات content حفظ شود
         content = dict(item)
 
-        # اطمینان از وجود type
         if not content.get("type"):
             content["type"] = "unknown"
 
-        # برای سازگاری با HTML
         if "text" not in content:
             content["text"] = (
                 content.get("content")
@@ -133,6 +88,7 @@ def serialize_contents(contents):
             content["caption"] = ""
 
         if "file_name" not in content:
+
             content["file_name"] = (
                 content.get("filename")
                 or content.get("document_name")
@@ -146,7 +102,6 @@ def serialize_contents(contents):
 
 
 def get_breadcrumb(db, node_id):
-    """ساخت مسیر والدین نود."""
 
     path = []
     seen = set()
@@ -172,7 +127,7 @@ def get_breadcrumb(db, node_id):
 
         parent = node.get("parent")
 
-        if parent:
+        if parent is not None:
             cur = str(parent)
         else:
             cur = None
@@ -183,7 +138,6 @@ def get_breadcrumb(db, node_id):
 
 
 def serialize_node(db, node_id):
-    """تبدیل یک نود دیتابیس به داده قابل استفاده برای Mini App."""
 
     str_node_id = str(node_id)
 
@@ -217,7 +171,14 @@ def serialize_node(db, node_id):
                 []
             )
 
+            if not isinstance(
+                child_contents,
+                list
+            ):
+                child_contents = []
+
             row.append({
+
                 "id": str(cid),
 
                 "name": child.get(
@@ -233,9 +194,8 @@ def serialize_node(db, node_id):
 
                 "content_count": len(
                     child_contents
-                    if isinstance(child_contents, list)
-                    else []
-                ),
+                )
+
             })
 
         if row:
@@ -246,10 +206,14 @@ def serialize_node(db, node_id):
         []
     )
 
-    if not isinstance(node_contents, list):
+    if not isinstance(
+        node_contents,
+        list
+    ):
         node_contents = []
 
     return {
+
         "id": str_node_id,
 
         "name": node.get(
@@ -258,7 +222,7 @@ def serialize_node(db, node_id):
         ),
 
         "parent": (
-            str(node.get("parent"))
+            str(node["parent"])
             if node.get("parent") is not None
             else None
         ),
@@ -278,19 +242,39 @@ def serialize_node(db, node_id):
         "breadcrumb": get_breadcrumb(
             db,
             str_node_id
-        ),
+        )
+
     }
 
 
 async def miniapp_data(request):
-    """API اصلی Mini App."""
 
     node_id = request.query.get(
         "node",
         "root"
     )
 
-    db = load_db()
+    try:
+        # این همان load_db اصلی main.py است
+        db = load_db()
+
+    except Exception as e:
+
+        print(
+            "❌ Miniapp load_db error:",
+            repr(e)
+        )
+
+        return web.json_response(
+            {
+                "ok": False,
+                "error": (
+                    "خطا در بارگذاری دیتابیس: "
+                    + str(e)
+                )
+            },
+            status=500
+        )
 
     if not db:
 
@@ -307,8 +291,8 @@ async def miniapp_data(request):
 
     str_node_id = str(node_id)
 
-    # اگر نود وجود نداشت → root
     if str_node_id not in db:
+
         str_node_id = "root"
 
     payload = serialize_node(
