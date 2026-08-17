@@ -978,6 +978,129 @@
         animation-duration: 0.01ms !important;
       }
     }
+    /* =========================================================
+       Rich Text داخل محتوای کتابخانه
+       ========================================================= */
+    
+    .text-item b,
+    .text-item strong,
+    .file-title b,
+    .file-title strong,
+    .file-caption b,
+    .file-caption strong {
+      font-weight: 900;
+    }
+    
+    .text-item i,
+    .text-item em,
+    .file-title i,
+    .file-title em,
+    .file-caption i,
+    .file-caption em {
+      font-style: italic;
+    }
+    
+    .text-item u,
+    .file-title u,
+    .file-caption u {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    
+    .text-item s,
+    .text-item del,
+    .file-title s,
+    .file-title del,
+    .file-caption s,
+    .file-caption del {
+      text-decoration: line-through;
+      opacity: 0.75;
+    }
+    
+    .text-item code,
+    .file-title code,
+    .file-caption code {
+      display: inline-block;
+    
+      direction: ltr;
+      unicode-bidi: plaintext;
+    
+      margin: 2px 3px;
+      padding: 2px 7px;
+    
+      border: 1px solid rgba(0, 0, 0, 0.16);
+      border-radius: 7px;
+    
+      background: rgba(255, 255, 255, 0.58);
+      color: #000000 !important;
+    
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 0.88em;
+      font-weight: 700;
+    }
+    
+    .text-item pre,
+    .file-title pre,
+    .file-caption pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    
+      direction: ltr;
+      text-align: left;
+    
+      margin: 10px 0;
+      padding: 12px;
+    
+      border: 1px solid rgba(0, 0, 0, 0.16);
+      border-radius: 12px;
+    
+      background: rgba(0, 0, 0, 0.08);
+      color: #000000 !important;
+    
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 0.84em;
+      line-height: 1.8;
+    }
+    
+    .text-item blockquote,
+    .file-title blockquote,
+    .file-caption blockquote {
+      margin: 10px 0;
+      padding: 9px 13px;
+    
+      border-right: 4px solid var(--tg-theme-button-color, #2481cc);
+      border-radius: 10px;
+    
+      background: rgba(255, 255, 255, 0.22);
+      font-style: italic;
+    }
+    
+    /* اسپویلر تلگرام؛ با لمس/کلیک نمایان می‌شود */
+    .text-item tg-spoiler,
+    .file-title tg-spoiler,
+    .file-caption tg-spoiler {
+      cursor: pointer;
+    
+      padding: 1px 6px;
+      border-radius: 6px;
+    
+      color: transparent;
+      background: rgba(0, 0, 0, 0.58);
+    
+      user-select: none;
+    }
+    
+    .text-item tg-spoiler:hover,
+    .text-item tg-spoiler:active,
+    .file-title tg-spoiler:hover,
+    .file-title tg-spoiler:active,
+    .file-caption tg-spoiler:hover,
+    .file-caption tg-spoiler:active {
+      color: inherit;
+      background: rgba(255, 255, 255, 0.55);
+    }
+    
+
   </style>
 </head>
 
@@ -1569,6 +1692,90 @@
 
     }
 
+    /* =========================================================
+       نمایش امن متن فرمت‌دار HTML
+       تگ‌های پشتیبانی‌شده:
+       b, strong, i, em, u, s, del, code, pre, br, blockquote,
+       tg-spoiler
+       ========================================================= */
+    
+    function formatRichText(value) {
+      const template = document.createElement("template");
+    
+      template.innerHTML = String(value || "");
+    
+      const allowedTags = new Set([
+        "B",
+        "STRONG",
+        "I",
+        "EM",
+        "U",
+        "S",
+        "DEL",
+        "CODE",
+        "PRE",
+        "BR",
+        "BLOCKQUOTE",
+        "TG-SPOILER"
+      ]);
+    
+      function sanitizeNodes(parent) {
+        const nodes = [...parent.childNodes];
+    
+        nodes.forEach((node) => {
+          // متن عادی بدون تغییر باقی می‌ماند
+          if (node.nodeType === Node.TEXT_NODE) {
+            return;
+          }
+    
+          // اگر کامنت یا نوع ناشناخته باشد حذف می‌شود
+          if (node.nodeType !== Node.ELEMENT_NODE) {
+            node.remove();
+            return;
+          }
+    
+          // اگر تگ غیرمجاز بود، خود تگ حذف می‌شود
+          // ولی متن و فرزندانش باقی می‌مانند.
+          if (!allowedTags.has(node.tagName)) {
+            const fragment = document.createDocumentFragment();
+    
+            while (node.firstChild) {
+              fragment.appendChild(node.firstChild);
+            }
+    
+            node.replaceWith(fragment);
+    
+            // برای پاک‌سازی تگ‌های داخلی، دوباره بررسی می‌کنیم
+            sanitizeNodes(parent);
+            return;
+          }
+    
+          // تمام attributeها حذف می‌شوند:
+          // onclick، style، href، src و... اجازه ندارند.
+          [...node.attributes].forEach((attribute) => {
+            node.removeAttribute(attribute.name);
+          });
+    
+          // پاک‌سازی محتوای داخل تگ مجاز
+          sanitizeNodes(node);
+        });
+      }
+    
+      sanitizeNodes(template.content);
+    
+      return template.innerHTML;
+    }
+    
+    
+    /* برای alt تصویر؛ تگ HTML در alt نباید نمایش داده شود */
+    function getPlainText(value) {
+      const temp = document.createElement("div");
+    
+      temp.innerHTML = formatRichText(value);
+    
+      return temp.textContent || temp.innerText || "";
+    }
+    
 
     /* =========================================================
        نمایش محتوا
@@ -1605,10 +1812,11 @@
     
         if (type === "text") {
     
-          itemDiv.textContent =
+          itemDiv.innerHTML = formatRichText(
             item.text ||
             item.content ||
-            "";
+            ""
+          );
     
           box.appendChild(itemDiv);
     
@@ -1621,9 +1829,9 @@
           const title = document.createElement("div");
           title.className = "file-title";
     
-          title.textContent =
+          title.innerHTML =
             "📎 " +
-            (
+            formatRichText(
               item.file_name ||
               item.caption ||
               "محتوا"
@@ -1639,8 +1847,9 @@
             caption.className =
               "file-caption";
     
-            caption.textContent =
-              item.caption;
+            caption.textContent = formatRichText(
+              item.caption
+              );
     
             itemDiv.appendChild(caption);
           }
@@ -1698,8 +1907,9 @@
             caption.className =
               "file-caption";
     
-            caption.textContent =
-              item.caption;
+            caption.textContent = formatRichText(
+              item.caption
+              );
     
             itemDiv.appendChild(caption);
           }
@@ -1716,9 +1926,9 @@
           const title = document.createElement("div");
           title.className = "file-title";
         
-          title.textContent =
+          title.innerHTML =
             "🎬 " +
-            (filename || "ویدیو");
+            formatRichText(filename || "ویدیو");
         
           itemDiv.appendChild(title);
         
@@ -1820,8 +2030,9 @@
             caption.className =
               "file-caption";
         
-            caption.textContent =
-              item.caption;
+            caption.textContent = formatRichText(
+              item.caption
+              );
         
             itemDiv.appendChild(caption);
           }
@@ -1874,8 +2085,9 @@
             caption.className =
               "file-caption";
     
-            caption.textContent =
-              item.caption;
+            caption.textContent = formatRichText(
+              item.caption
+              );
     
             itemDiv.appendChild(caption);
           }
@@ -1919,9 +2131,9 @@
           title.className =
             "file-title";
     
-          title.textContent =
+          title.innerHTML =
             "📄 " +
-            filename;
+            formatRichText(filename);
     
           itemDiv.appendChild(title);
     
@@ -1934,8 +2146,9 @@
             caption.className =
               "file-caption";
     
-            caption.textContent =
-              item.caption;
+            caption.textContent = formatRichText(
+              item.caption
+              );
     
             itemDiv.appendChild(caption);
           }
@@ -2033,9 +2246,9 @@
         title.className =
           "file-title";
     
-        title.textContent =
+        title.innerHTML =
           "📎 " +
-          filename;
+          formatRichText(filename);
     
         itemDiv.appendChild(title);
     
