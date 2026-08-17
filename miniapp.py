@@ -1,11 +1,50 @@
 import json
+import os
 from aiohttp import web
 
-# مهم:
-# این تابع باید با دیتابیس اصلی ربات کار کند.
-# اگر load_db در main.py است، از همان استفاده می‌کنیم.
-from main import load_db
 
+DB_FILE = "/tmp/database.json"
+
+
+def load_db():
+    """
+    دیتابیس را از فایل محلی می‌خواند.
+    """
+
+    if not os.path.exists(DB_FILE):
+        print(
+            f"⚠️ Mini App DB not found: {DB_FILE}"
+        )
+
+        return {}
+
+    try:
+
+        with open(
+            DB_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            print(
+                "⚠️ Mini App DB is not a dictionary."
+            )
+
+            return {}
+
+        return data
+
+    except Exception as e:
+
+        print(
+            "❌ Mini App failed to load DB:",
+            repr(e)
+        )
+
+        return {}
 
 def get_style(node):
     raw_style = (
