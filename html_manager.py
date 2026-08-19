@@ -828,7 +828,36 @@ async def html_receive_backup(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def html_http_handler(request: web.Request):
-    """Serve the selected HTML ZIP without exposing /tmp paths."""
+    """
+    Serve an imported HTML ZIP.
+
+    Important:
+    The URL is based on the public /html/<id>/ path, but assets are
+    resolved relative to the directory containing index.html.
+
+    Example ZIP:
+
+        lesson/
+            index.html
+            images/
+                test.jpg
+            css/
+                style.css
+            js/
+                app.js
+
+    If index.html is inside "lesson/", then:
+
+        /html/1/
+        -> lesson/index.html
+
+        /html/1/images/test.jpg
+        -> lesson/images/test.jpg
+
+        /html/1/css/style.css
+        -> lesson/css/style.css
+    """
+
     try:
         zip_id = int(request.match_info["zip_id"])
     except (TypeError, ValueError):
@@ -836,42 +865,189 @@ async def html_http_handler(request: web.Request):
 
     db = _load_db()
     item = db.get("zips", {}).get(str(zip_id))
+
     if not item:
         raise web.HTTPNotFound(text="HTML not found")
 
     try:
+        # ---------------------------------------------------------
+        # Render directory
+        # ---------------------------------------------------------
+
         render_root = HTML_ROOT / "rendered" / str(zip_id)
+
         if not render_root.exists():
             _extract_for_serving(zip_id)
 
-        requested = request.match_info.get("path", "")
-        # If no path is supplied, use the index directory recorded at import time.
-        if not requested:
-            index_dir = item.get("index_dir", "")
-            if index_dir in {"", "."}:
-                file_path = render_root / "index.html"
-            else:
-                file_path = render_root / index_dir / "index.html"
-        else:
-            # A URL such as /html/12/assets/app.js.
-            requested = requested.lstrip("/")
-            file_path = render_root / requested
+        if not render_root.exists():
+            raise web.HTTPNotFound(text="HTML files not found")
 
-        # Prevent traversal after resolution.
-        resolved_root = render_root.resolve()
-        resolved = file_path.resolve()
-        if resolved != resolved_root and resolved_root not in resolved.parents:
+        # ---------------------------------------------------------
+        # Find the directory containing index.html
+        # ---------------------------------------------------------
+
+        index_dir = item.get("index_dir", "") or ""
+
+        index_dir = index_dir.replace("\\", "/").strip("/")
+
+        if index_dir in ("", "."):
+            html_root = render_root
+        else:
+            html_root = render_root / index_dir
+
+        html_root = html_root.resolve()
+        render_root_resolved = render_root.resolve()
+
+        # Safety check
+        if (
+            html_root != render_root_resolved
+            and render_root_resolved not in html_root.parents
+        ):
             raise web.HTTPForbidden(text="Forbidden")
-        if not resolved.exists() or not resolved.is_file():
+
+        # ---------------------------------------------------------
+        # Requested path
+        # ---------------------------------------------------------
+
+        requested = request.match_info.get("path", "") or ""
+        requested = requested.replace("\\", "/").lstrip("/")
+
+        # ---------------------------------------------------------
+        # No path = serve index.html
+        # ---------------------------------------------------------
+
+        if not requested:
+
+            file_path = html_root / "index.html"
+
+            # Support index.htm too
+            if not file_path.exists():
+                file_path = html_root / "index.htm"
+
+        else:
+
+            # IMPORTANT:
+            # Assets are relative to the index.html directory.
+            #
+            # Example:
+            #
+            # index:
+            #   lesson/index.html
+            #
+            # browser asks:
+            #   /html/1/images/a.jpg
+            #
+            # actual:
+            #   lesson/images/a.jpg
+            #
+
+            file_path = html_root / requested
+
+        # ---------------------------------------------------------
+        # Resolve and prevent path traversal
+        # ---------------------------------------------------------
+
+        resolved = file_path.resolve()
+
+        if (
+            resolved != render_root_resolved
+            and render_root_resolved not in resolved.parents
+        ):
+            raise web.HTTPForbidden(text="Forbidden")
+
+        # ---------------------------------------------------------
+        # File existence
+        # ---------------------------------------------------------
+
+        if not resolved.exists():
+            log.warning(
+                "HTML file not found: zip_id=%s requested=%s resolved=%s",
+                zip_id,
+                requested,
+                resolved,
+            )
             raise web.HTTPNotFound(text="File not found")
 
-        return web.FileResponse(resolved)
+        if not resolved.is_file():
+            raise web.HTTPNotFound(text="Not a file")
+
+        # ---------------------------------------------------------
+        # MIME type
+        # ---------------------------------------------------------
+
+        import mimetypes
+
+        suffix = resolved.suffix.lower()
+
+        mime_types = {
+            ".html": "text/html; charset=utf-8",
+            ".htm": "text/html; charset=utf-8",
+
+            ".css": "text/css; charset=utf-8",
+
+            ".js": "application/javascript; charset=utf-8",
+            ".mjs": "application/javascript; charset=utf-8",
+
+            ".json": "application/json; charset=utf-8",
+
+            ".svg": "image/svg+xml",
+
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".ico": "image/x-icon",
+            ".avif": "image/avif",
+
+            ".mp3": "audio/mpeg",
+            ".wav": "audio/wav",
+            ".ogg": "audio/ogg",
+
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
+            ".ttf": "font/ttf",
+            ".otf": "font/otf",
+        }
+
+        content_type = mime_types.get(suffix)
+
+        if content_type is None:
+            content_type, _ = mimetypes.guess_type(str(resolved))
+
+        if content_type is None:
+            content_type = "application/octet-stream"
+
+        # ---------------------------------------------------------
+        # Response
+        # ---------------------------------------------------------
+
+        return web.FileResponse(
+            path=resolved,
+            headers={
+                "Content-Type": content_type,
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+
     except web.HTTPException:
         raise
-    except Exception:
-        log.exception("HTML render failed for %s", zip_id)
-        raise web.HTTPInternalServerError(text="HTML render error")
 
+    except Exception:
+        log.exception(
+            "HTML render failed for zip_id=%s",
+            zip_id,
+        )
+
+        raise web.HTTPInternalServerError(
+            text="HTML render error"
+        )
 
 # ---------------------------------------------------------------------------
 # Integration helpers
