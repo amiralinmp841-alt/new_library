@@ -6186,6 +6186,17 @@ def build_application():
     application.add_handler(CommandHandler("6", set_row_count), group=0)
     application.add_handler(CommandHandler("style", set_custom_layout), group=0)
     application.add_handler(CommandHandler("miniapp", miniapp_command), group=0)
+
+    application.add_handler(
+        MessageReactionHandler(handle_reaction, message_reaction_types=MessageReactionHandler.MESSAGE_REACTION), 
+        group=0
+        )
+
+    application.add_handler(
+        MessageHandler(filters.TEXT & (~filters.COMMAND), not_started),
+        group=0
+    )
+
 # ================= HTML MANAGER =================
 
     application.add_handler(
@@ -6201,16 +6212,6 @@ def build_application():
     application.add_handler(
         build_html_backup_message_handler(),
         group=0,
-    )
-    
-    application.add_handler(
-        MessageReactionHandler(handle_reaction, message_reaction_types=MessageReactionHandler.MESSAGE_REACTION), 
-        group=0
-        )
-
-    application.add_handler(
-        MessageHandler(filters.TEXT & (~filters.COMMAND), not_started),
-        group=0
     )
     
     # ادیت پیام
