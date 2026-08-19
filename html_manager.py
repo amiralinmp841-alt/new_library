@@ -34,14 +34,9 @@ HTML_DB_FILE = "/tmp/html_database.json"
 HTML_ROOT = "/tmp/html_pages"
 HTML_BACKUP_FILE = "/tmp/html_backup.zip"
 
-HTML_BASE_URL = os.getenv(
-    "HTML_BASE_URL",
-    "https://YOUR-APP.onrender.com/html"
-).rstrip("/")
-
-HTML_BACKUP_CHAT_ID = int(
-    os.getenv("HTML_BACKUP_CHAT_ID", "0") or "0"
-)
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+HTML_BASE_URL = f"{WEBHOOK_URL}/html"
+HTML_BACKUP_CHAT_ID = int(os.getenv("HTML_BACKUP_CHAT_ID", "0"))
 
 PAGE_SIZE = 8
 
