@@ -24,6 +24,9 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
+import mimetypes
+from urllib.parse import unquote
+from pathlib import PurePosixPath
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -821,41 +824,407 @@ async def html_receive_backup(update: Update, context: ContextTypes.DEFAULT_TYPE
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+# Smart asset resolver / HTML-CSS URL repair
+# ---------------------------------------------------------------------------
+
+ASSET_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif",
+    ".css", ".js", ".mjs", ".json",
+    ".woff", ".woff2", ".ttf", ".otf",
+    ".mp3", ".wav", ".ogg", ".mp4", ".webm",
+    ".pdf", ".txt",
+}
+
+
+def _is_inside(child: Path, parent: Path) -> bool:
+    """
+    بررسی می‌کند child واقعاً داخل parent باشد.
+    برای جلوگیری از path traversal استفاده می‌شود.
+    """
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _clean_requested_path(value: str) -> str:
+    """
+    مسیر URL را تمیز می‌کند اما ../ را حذف نمی‌کند؛
+    چون ممکن است فایل HTML واقعاً از ../images/a.png استفاده کرده باشد.
+
+    مثال:
+      images\\a.jpg -> images/a.jpg
+      ./images/a.jpg -> images/a.jpg
+      /images/a.jpg -> images/a.jpg
+    """
+    value = unquote(str(value or ""))
+    value = value.replace("\\", "/").strip()
+
+    # مواردی که اصلاً فایل محلی نیستند
+    if (
+        value.startswith("http://")
+        or value.startswith("https://")
+        or value.startswith("data:")
+        or value.startswith("blob:")
+        or value.startswith("file:")
+        or value.startswith("mailto:")
+        or value.startswith("tel:")
+        or value.startswith("#")
+    ):
+        return ""
+
+    value = value.split("?", 1)[0].split("#", 1)[0]
+    value = value.lstrip("/")
+
+    while value.startswith("./"):
+        value = value[2:]
+
+    return value
+
+
+def _case_insensitive_path(root: Path, relative_path: str):
+    """
+    فایل را با نادیده‌گرفتن تفاوت حروف بزرگ و کوچک پیدا می‌کند.
+
+    مثلاً اگر HTML نوشته باشد:
+        images/Test.JPG
+
+    ولی فایل واقعی باشد:
+        Images/test.jpg
+
+    باز هم آن را پیدا می‌کند.
+    """
+    relative_path = _clean_requested_path(relative_path)
+
+    if not relative_path:
+        return None
+
+    current = root
+
+    # PurePosixPath برای ZIP و URL مناسب‌تر از Path ویندوز است.
+    for part in PurePosixPath(relative_path).parts:
+        if part in ("", "."):
+            continue
+
+        if part == "..":
+            current = current.parent
+            if not _is_inside(current, root):
+                return None
+            continue
+
+        if not current.exists() or not current.is_dir():
+            return None
+
+        # اول تطابق دقیق
+        exact = current / part
+        if exact.exists():
+            current = exact
+            continue
+
+        # سپس تطابق بدون حساسیت به حروف
+        part_lower = part.casefold()
+        matched = None
+
+        try:
+            for child in current.iterdir():
+                if child.name.casefold() == part_lower:
+                    matched = child
+                    break
+        except OSError:
+            return None
+
+        if matched is None:
+            return None
+
+        current = matched
+
+    if current.exists() and current.is_file() and _is_inside(current, root):
+        return current
+
+    return None
+
+
+def _find_asset_by_filename(render_root: Path, requested: str):
+    """
+    آخرین fallback:
+
+    اگر HTML فقط نوشته باشد:
+        <img src="photo.jpg">
+
+    ولی فایل واقعی در این مسیر باشد:
+        assets/images/photo.jpg
+
+    این تابع براساس نام فایل جست‌وجو می‌کند.
+
+    نکته:
+    اگر چند فایل هم‌نام وجود داشته باشند، هیچ‌کدام را انتخاب نمی‌کنیم
+    تا تصویر اشتباه نمایش داده نشود.
+    """
+    requested = _clean_requested_path(requested)
+
+    if not requested:
+        return None
+
+    filename = PurePosixPath(requested).name
+    if not filename:
+        return None
+
+    target = filename.casefold()
+    matches = []
+
+    try:
+        for candidate in render_root.rglob("*"):
+            if (
+                candidate.is_file()
+                and candidate.name.casefold() == target
+                and _is_inside(candidate, render_root)
+            ):
+                matches.append(candidate)
+
+                # اگر بیش از یک فایل هم‌نام باشد، fallback خطرناک است.
+                if len(matches) > 1:
+                    return None
+    except OSError:
+        return None
+
+    return matches[0] if len(matches) == 1 else None
+
+
+def _resolve_asset_file(render_root: Path, html_root: Path, requested: str):
+    """
+    Resolver مقاوم برای فایل‌های HTML/CSS/JS/تصویر.
+
+    ترتیب تلاش:
+    1) مسیر نسبی نسبت به محل index.html
+    2) مسیر نسبی نسبت به ریشه ZIP
+    3) مسیر بدون حساسیت به uppercase/lowercase
+    4) جست‌وجوی یکتا براساس نام فایل در کل ZIP
+    """
+    requested = _clean_requested_path(requested)
+
+    if not requested:
+        return None
+
+    candidates = []
+
+    # حالت اصلی:
+    # index.html کنار images/ باشد.
+    candidates.append(html_root / requested)
+
+    # اگر ZIP ساختار نامنظم دارد و asset از ریشه ZIP صدا زده شده باشد.
+    candidates.append(render_root / requested)
+
+    # اگر درخواست با ../ باشد، حالت اصلی اهمیت بیشتری دارد.
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+
+        if _is_inside(resolved, render_root) and resolved.exists() and resolved.is_file():
+            return resolved
+
+    # حالت case-insensitive نسبت به index directory
+    found = _case_insensitive_path(html_root, requested)
+    if found:
+        return found
+
+    # حالت case-insensitive نسبت به ریشه ZIP
+    found = _case_insensitive_path(render_root, requested)
+    if found:
+        return found
+
+    # آخرین تلاش: فقط اگر نام فایل در کل ZIP یکتا باشد.
+    return _find_asset_by_filename(render_root, requested)
+
+
+def _make_public_asset_url(zip_id: int, url_value: str) -> str:
+    """
+    مسیرهای absolute اشتباه را به مسیر صحیح جزوه تبدیل می‌کند.
+
+    /images/a.jpg
+    -> /html/1/images/a.jpg
+
+    images/a.jpg
+    -> بدون تغییر؛ چون relative است و مرورگر خودش درست resolve می‌کند.
+    """
+    value = str(url_value or "").strip()
+
+    if not value:
+        return value
+
+    lower = value.lower()
+
+    # URL خارجی یا data URI را دست‌کاری نکن.
+    if lower.startswith((
+        "http://", "https://", "//",
+        "data:", "blob:", "mailto:", "tel:", "#"
+    )):
+        return value
+
+    # فقط مسیر absolute دامنه مشکل‌ساز است.
+    if value.startswith("/"):
+        return f"/html/{int(zip_id)}/{value.lstrip('/')}"
+
+    return value
+
+
+def _rewrite_html_for_zip(html_text: str, zip_id: int) -> str:
+    """
+    HTML را هنگام ارسال اصلاح می‌کند تا:
+    - <base href="/"> خراب‌کاری نکند.
+    - مسیرهای absolute مانند /images/a.jpg به /html/<id>/images/a.jpg تبدیل شوند.
+    - مسیرهای src, href, poster, data-src و srcset تا حد ممکن درست شوند.
+    """
+
+    public_base = f"/html/{int(zip_id)}/"
+
+    # هر base موجود را حذف می‌کنیم؛ چون اغلب باعث خراب شدن assetها می‌شود.
+    html_text = re.sub(
+        r"<base\b[^>]*>",
+        "",
+        html_text,
+        flags=re.IGNORECASE,
+    )
+
+    # base صحیح را بعد از <head> تزریق می‌کنیم.
+    base_tag = f'<base href="{public_base}">'
+    if re.search(r"<head\b[^>]*>", html_text, flags=re.IGNORECASE):
+        html_text = re.sub(
+            r"(<head\b[^>]*>)",
+            r"\1" + base_tag,
+            html_text,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    else:
+        html_text = base_tag + html_text
+
+    # src / href / poster / data-src / data-background
+    attribute_pattern = re.compile(
+        r'(?P<prefix>\b(?:src|href|poster|data-src|data-background)\s*=\s*)(?P<quote>["\'])(?P<url>.*?)(?P=quote)',
+        flags=re.IGNORECASE,
+    )
+
+    def replace_attribute(match):
+        fixed = _make_public_asset_url(zip_id, match.group("url"))
+        return f'{match.group("prefix")}{match.group("quote")}{fixed}{match.group("quote")}'
+
+    html_text = attribute_pattern.sub(replace_attribute, html_text)
+
+    # srcset نمونه:
+    # srcset="/images/a.jpg 1x, /images/b.jpg 2x"
+    srcset_pattern = re.compile(
+        r'(?P<prefix>\bsrcset\s*=\s*)(?P<quote>["\'])(?P<value>.*?)(?P=quote)',
+        flags=re.IGNORECASE,
+    )
+
+    def replace_srcset(match):
+        pieces = []
+        for item in match.group("value").split(","):
+            item = item.strip()
+            if not item:
+                continue
+
+            parts = item.split()
+            url = parts[0]
+            descriptor = " ".join(parts[1:])
+
+            fixed_url = _make_public_asset_url(zip_id, url)
+            pieces.append(f"{fixed_url} {descriptor}".strip())
+
+        return f'{match.group("prefix")}{match.group("quote")}{", ".join(pieces)}{match.group("quote")}'
+
+    html_text = srcset_pattern.sub(replace_srcset, html_text)
+
+    # CSS inline:
+    # style="background-image:url('/images/bg.jpg')"
+    html_text = _rewrite_css_urls(html_text, zip_id)
+
+    return html_text
+
+
+def _rewrite_css_urls(css_text: str, zip_id: int) -> str:
+    """
+    مسیرهای absolute داخل CSS را اصلاح می‌کند.
+
+    url('/images/bg.png')
+    -> url('/html/1/images/bg.png')
+    """
+    pattern = re.compile(
+        r'url\(\s*(?P<quote>["\']?)(?P<url>.*?)(?P=quote)\s*\)',
+        flags=re.IGNORECASE,
+    )
+
+    def replace_url(match):
+        raw_url = match.group("url").strip()
+        fixed_url = _make_public_asset_url(zip_id, raw_url)
+        quote = match.group("quote") or ""
+        return f"url({quote}{fixed_url}{quote})"
+
+    return pattern.sub(replace_url, css_text)
+
+
+def _content_type_for_file(path: Path) -> str:
+    """
+    MIME type مناسب؛ مخصوصاً برای عکس، فونت، CSS و JS.
+    """
+    suffix = path.suffix.lower()
+
+    mime_types = {
+        ".html": "text/html; charset=utf-8",
+        ".htm": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
+        ".mjs": "application/javascript; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".ico": "image/x-icon",
+        ".avif": "image/avif",
+
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".otf": "font/otf",
+        ".pdf": "application/pdf",
+    }
+
+    content_type = mime_types.get(suffix)
+    if content_type:
+        return content_type
+
+    guessed, _ = mimetypes.guess_type(str(path))
+    return guessed or "application/octet-stream"
 
 # ---------------------------------------------------------------------------
 # HTTP serving: /html/<id> and /html/<id>/...
 # ---------------------------------------------------------------------------
 
-
 async def html_http_handler(request: web.Request):
     """
-    Serve an imported HTML ZIP.
+    سرو کردن HTML و assetهای آن با resolver مقاوم.
 
-    Important:
-    The URL is based on the public /html/<id>/ path, but assets are
-    resolved relative to the directory containing index.html.
-
-    Example ZIP:
-
-        lesson/
-            index.html
-            images/
-                test.jpg
-            css/
-                style.css
-            js/
-                app.js
-
-    If index.html is inside "lesson/", then:
-
-        /html/1/
-        -> lesson/index.html
-
-        /html/1/images/test.jpg
-        -> lesson/images/test.jpg
-
-        /html/1/css/style.css
-        -> lesson/css/style.css
+    پشتیبانی از:
+    - مسیرهای صحیح relative
+    - مسیرهای اشتباه نسبت به root ZIP
+    - uppercase/lowercase متفاوت
+    - فایل در پوشه‌ای متفاوت ولی با نام یکتا
+    - مسیرهای absolute داخل HTML / CSS
     """
 
     try:
@@ -863,11 +1232,13 @@ async def html_http_handler(request: web.Request):
     except (TypeError, ValueError):
         raise web.HTTPNotFound(text="Not found")
 
-    # اگر کاربر /html/1 را باز کند، برای درست کار کردن
-    # مسیرهای نسبی عکس، CSS و JS به /html/1/ منتقل شود.
-    if not request.match_info.get("path") and not request.path.endswith("/"):
+    requested = request.match_info.get("path", "") or ""
+
+    # مهم:
+    # /html/1 باید به /html/1/ برود تا لینک‌های relative صحیح محاسبه شوند.
+    if not requested and not request.path.endswith("/"):
         raise web.HTTPFound(location=f"/html/{zip_id}/")
-    
+
     db = _load_db()
     item = db.get("zips", {}).get(str(zip_id))
 
@@ -875,166 +1246,114 @@ async def html_http_handler(request: web.Request):
         raise web.HTTPNotFound(text="HTML not found")
 
     try:
-        # ---------------------------------------------------------
-        # Render directory
-        # ---------------------------------------------------------
-
         render_root = HTML_ROOT / "rendered" / str(zip_id)
 
+        # بعد از restart Render، در صورت نبود فایل extracted، دوباره extract می‌کنیم.
         if not render_root.exists():
             _extract_for_serving(zip_id)
 
         if not render_root.exists():
             raise web.HTTPNotFound(text="HTML files not found")
 
-        # ---------------------------------------------------------
-        # Find the directory containing index.html
-        # ---------------------------------------------------------
+        render_root = render_root.resolve()
 
-        index_dir = item.get("index_dir", "") or ""
-
-        index_dir = index_dir.replace("\\", "/").strip("/")
+        # پوشه‌ای که index.html در آن قرار دارد.
+        index_dir = (item.get("index_dir", "") or "").replace("\\", "/").strip("/")
 
         if index_dir in ("", "."):
             html_root = render_root
         else:
-            html_root = render_root / index_dir
+            html_root = (render_root / index_dir).resolve()
 
-        html_root = html_root.resolve()
-        render_root_resolved = render_root.resolve()
-
-        # Safety check
-        if (
-            html_root != render_root_resolved
-            and render_root_resolved not in html_root.parents
-        ):
+        if not _is_inside(html_root, render_root) and html_root != render_root:
             raise web.HTTPForbidden(text="Forbidden")
 
         # ---------------------------------------------------------
-        # Requested path
+        # صفحه اصلی
         # ---------------------------------------------------------
-
-        requested = request.match_info.get("path", "") or ""
-        requested = requested.replace("\\", "/").lstrip("/")
-
-        # ---------------------------------------------------------
-        # No path = serve index.html
-        # ---------------------------------------------------------
-
         if not requested:
+            index_file = html_root / "index.html"
 
-            file_path = html_root / "index.html"
+            if not index_file.exists():
+                index_file = html_root / "index.htm"
 
-            # Support index.htm too
-            if not file_path.exists():
-                file_path = html_root / "index.htm"
+            if not index_file.exists():
+                # اگر index_dir در DB قدیمی/غلط باشد، دوباره پیدا کن.
+                index_file = _find_index_file(render_root)
+                html_root = index_file.parent.resolve()
 
-        else:
+            # HTML را به response عادی تبدیل می‌کنیم تا بتوانیم base و URLها را اصلاح کنیم.
+            html_text = index_file.read_text(encoding="utf-8", errors="replace")
+            html_text = _rewrite_html_for_zip(html_text, zip_id)
 
-            # IMPORTANT:
-            # Assets are relative to the index.html directory.
-            #
-            # Example:
-            #
-            # index:
-            #   lesson/index.html
-            #
-            # browser asks:
-            #   /html/1/images/a.jpg
-            #
-            # actual:
-            #   lesson/images/a.jpg
-            #
-
-            file_path = html_root / requested
-
-        # ---------------------------------------------------------
-        # Resolve and prevent path traversal
-        # ---------------------------------------------------------
-
-        resolved = file_path.resolve()
-
-        if (
-            resolved != render_root_resolved
-            and render_root_resolved not in resolved.parents
-        ):
-            raise web.HTTPForbidden(text="Forbidden")
+            return web.Response(
+                text=html_text,
+                content_type="text/html",
+                charset="utf-8",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
 
         # ---------------------------------------------------------
-        # File existence
+        # فایل‌های دیگر: image, css, js, font, video, pdf, ...
         # ---------------------------------------------------------
+        file_path = _resolve_asset_file(
+            render_root=render_root,
+            html_root=html_root,
+            requested=requested,
+        )
 
-        if not resolved.exists():
+        if file_path is None:
             log.warning(
-                "HTML file not found: zip_id=%s requested=%s resolved=%s",
+                "HTML asset not found | zip_id=%s | requested=%r | html_root=%s",
                 zip_id,
                 requested,
-                resolved,
+                html_root,
             )
             raise web.HTTPNotFound(text="File not found")
 
-        if not resolved.is_file():
-            raise web.HTTPNotFound(text="Not a file")
+        suffix = file_path.suffix.lower()
 
-        # ---------------------------------------------------------
-        # MIME type
-        # ---------------------------------------------------------
+        # CSS را هم rewrite می‌کنیم تا url('/images/a.jpg') درست شود.
+        if suffix == ".css":
+            css_text = file_path.read_text(encoding="utf-8", errors="replace")
+            css_text = _rewrite_css_urls(css_text, zip_id)
 
-        import mimetypes
+            return web.Response(
+                text=css_text,
+                content_type="text/css",
+                charset="utf-8",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
 
-        suffix = resolved.suffix.lower()
+        # اگر HTML دیگری، iframe، یا صفحه داخلی وجود داشت، آن را نیز اصلاح کن.
+        if suffix in {".html", ".htm"}:
+            html_text = file_path.read_text(encoding="utf-8", errors="replace")
+            html_text = _rewrite_html_for_zip(html_text, zip_id)
 
-        mime_types = {
-            ".html": "text/html; charset=utf-8",
-            ".htm": "text/html; charset=utf-8",
+            return web.Response(
+                text=html_text,
+                content_type="text/html",
+                charset="utf-8",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
 
-            ".css": "text/css; charset=utf-8",
-
-            ".js": "application/javascript; charset=utf-8",
-            ".mjs": "application/javascript; charset=utf-8",
-
-            ".json": "application/json; charset=utf-8",
-
-            ".svg": "image/svg+xml",
-
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
-            ".bmp": "image/bmp",
-            ".ico": "image/x-icon",
-            ".avif": "image/avif",
-
-            ".mp3": "audio/mpeg",
-            ".wav": "audio/wav",
-            ".ogg": "audio/ogg",
-
-            ".mp4": "video/mp4",
-            ".webm": "video/webm",
-
-            ".woff": "font/woff",
-            ".woff2": "font/woff2",
-            ".ttf": "font/ttf",
-            ".otf": "font/otf",
-        }
-
-        content_type = mime_types.get(suffix)
-
-        if content_type is None:
-            content_type, _ = mimetypes.guess_type(str(resolved))
-
-        if content_type is None:
-            content_type = "application/octet-stream"
-
-        # ---------------------------------------------------------
-        # Response
-        # ---------------------------------------------------------
-
+        # تصویر، فونت، ویدئو، فایل‌های صوتی و ...
         return web.FileResponse(
-            path=resolved,
+            path=file_path,
             headers={
-                "Content-Type": content_type,
+                "Content-Type": _content_type_for_file(file_path),
                 "Cache-Control": "no-cache, no-store, must-revalidate",
                 "Pragma": "no-cache",
                 "Expires": "0",
@@ -1045,14 +1364,9 @@ async def html_http_handler(request: web.Request):
         raise
 
     except Exception:
-        log.exception(
-            "HTML render failed for zip_id=%s",
-            zip_id,
-        )
+        log.exception("HTML render failed for zip_id=%s", zip_id)
+        raise web.HTTPInternalServerError(text="HTML render error")
 
-        raise web.HTTPInternalServerError(
-            text="HTML render error"
-        )
 
 # ---------------------------------------------------------------------------
 # Integration helpers
