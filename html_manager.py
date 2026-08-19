@@ -42,6 +42,13 @@ PAGE_SIZE = 8
 
 os.makedirs(HTML_ROOT, exist_ok=True)
 
+# =========================================================
+# HTML Conversation States
+# =========================================================
+
+HTML_WAITING_ZIP = 1001
+HTML_WAITING_NAME = 1002
+HTML_WAITING_BACKUP = 1003
 
 # =========================================================
 # اتصال تنبل به main.py
