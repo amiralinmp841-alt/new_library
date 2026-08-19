@@ -402,7 +402,7 @@ def _html_base_url():
 
 
 def _public_url(zip_id):
-    return f"{_html_base_url()}/{int(zip_id)}"
+    return f"{_html_base_url()}/{int(zip_id)}/"
 
 
 def _sorted_items():
@@ -863,6 +863,11 @@ async def html_http_handler(request: web.Request):
     except (TypeError, ValueError):
         raise web.HTTPNotFound(text="Not found")
 
+    # اگر کاربر /html/1 را باز کند، برای درست کار کردن
+    # مسیرهای نسبی عکس، CSS و JS به /html/1/ منتقل شود.
+    if not request.match_info.get("path") and not request.path.endswith("/"):
+        raise web.HTTPFound(location=f"/html/{zip_id}/")
+    
     db = _load_db()
     item = db.get("zips", {}).get(str(zip_id))
 
