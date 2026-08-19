@@ -1,1318 +1,920 @@
-# html_manager.py
-# مدیریت جزوه‌های HTML چندفایلی + هاست روی همان سرور ربات
-#
-# وابستگی به main.py فقط در زمان اجرا انجام می‌شود تا circular import ایجاد نشود.
-# main.py باید تابع‌های زیر را داشته باشد:
-#   run_telethon
-#   telethon_client
-#   load_userdata
-#   ADMIN_IDS
-#   ApplicationHandlerStop
-#
-# ENV:
-#   HTML_BASE_URL=https://YOUR-APP.onrender.com/html
-#   HTML_BACKUP_CHAT_ID=-100xxxxxxxxxx
+# -*- coding: utf-8 -*-
+"""
+HTML ZIP Manager for the Telegram bot.
 
-import os
+- /html -> receive ZIP -> receive booklet name -> publish at /html/<numeric-id>
+- Admin panel: HTML management
+- HTML ZIPs are stored under /tmp/html_zips and described by html_database.json
+- Automatic backup is one archive: html_backup.zip
+- Backup archive contains html_database.json + all ZIP files.
+- Backup is uploaded to the configured Telethon backup group after every mutation.
+- On startup the newest html_backup.zip is restored if local files are missing.
+
+This module intentionally does NOT import main.py.  main.py injects the few
+functions/resources that already exist there, avoiding circular imports.
+"""
+
 import io
 import json
-import zipfile
+import logging
+import os
+import re
 import shutil
-import html
+import tempfile
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
-from aiohttp import web
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import (
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
 )
-from telegram.ext import ContextTypes, ApplicationHandlerStop
+from aiohttp import web
+
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+HTML_WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
+HTML_BACKUP_CHAT_ID = int(os.getenv("HTML_BACKUP_CHAT_ID", "0") or "0")
+HTML_DB_FILE = os.getenv("HTML_DB_FILE", "/tmp/html_database.json")
+HTML_ROOT = Path(os.getenv("HTML_ROOT", "/tmp/html_zips"))
+HTML_BACKUP_FILE = os.getenv("HTML_BACKUP_FILE", "/tmp/html_backup.zip")
+HTML_MAX_ZIP_BYTES = int(os.getenv("HTML_MAX_ZIP_BYTES", str(50 * 1024 * 1024)))
+HTML_PAGE_SIZE = 8
+HTML_LOG_MAX = 3000
+
+# PTB conversation states are local to this ConversationHandler.
+HTML_WAIT_ZIP, HTML_WAIT_NAME = range(2)
+
+# Injected by main.py.
+ADMIN_IDS = set()
+_get_userdata = None
+_upload_file_to_telegram = None
+_download_latest_file_from_telegram = None
+_run_telethon = None
+_telethon_client = None
 
 
-HTML_DB_FILE = "/tmp/html_database.json"
-HTML_ROOT = "/tmp/html_pages"
-HTML_BACKUP_FILE = "/tmp/html_backup.zip"
+def configure_html_manager(
+    *,
+    admin_ids,
+    get_userdata,
+    upload_file_to_telegram,
+    download_latest_file_from_telegram,
+    run_telethon=None,
+    telethon_client=None,
+):
+    """Inject main.py dependencies without importing main.py."""
+    global ADMIN_IDS, _get_userdata, _upload_file_to_telegram
+    global _download_latest_file_from_telegram, _run_telethon, _telethon_client
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-HTML_BASE_URL = f"{WEBHOOK_URL}/html"
-HTML_BACKUP_CHAT_ID = int(os.getenv("HTML_BACKUP_CHAT_ID", "0"))
-
-PAGE_SIZE = 8
-
-os.makedirs(HTML_ROOT, exist_ok=True)
-
-# =========================================================
-# HTML Conversation States
-# =========================================================
-
-HTML_WAITING_ZIP = 1001
-HTML_WAITING_NAME = 1002
-HTML_WAITING_BACKUP = 1003
-
-# =========================================================
-# اتصال تنبل به main.py
-# =========================================================
-
-def _main():
-    import main
-    return main
+    ADMIN_IDS = {int(x) for x in (admin_ids or [])}
+    _get_userdata = get_userdata
+    _upload_file_to_telegram = upload_file_to_telegram
+    _download_latest_file_from_telegram = download_latest_file_from_telegram
+    _run_telethon = run_telethon
+    _telethon_client = telethon_client
 
 
-def _is_admin(user_id):
-    main = _main()
-    userdata = main.load_userdata()
-    sub_admins = userdata.get("sub_admins", [])
-    return (
-        user_id in main.ADMIN_IDS
-        or user_id in sub_admins
-    )
+# ---------------------------------------------------------------------------
+# Local DB / filesystem
+# ---------------------------------------------------------------------------
 
 
-def _run_telethon(coro):
-    return _main().run_telethon(coro)
+def _default_db():
+    return {"version": 1, "next_id": 1, "zips": {}}
 
 
-def _telethon_client():
-    return _main().telethon_client
+def _ensure_dirs():
+    HTML_ROOT.mkdir(parents=True, exist_ok=True)
+    Path(HTML_DB_FILE).parent.mkdir(parents=True, exist_ok=True)
 
 
-# =========================================================
-# DATABASE
-# =========================================================
-
-def _empty_db():
-    return {
-        "version": 1,
-        "next_id": 1,
-        "items": {}
-    }
-
-
-def load_html_db():
-    os.makedirs(HTML_ROOT, exist_ok=True)
-
+def _load_db():
+    _ensure_dirs()
     if not os.path.exists(HTML_DB_FILE):
-        data = _empty_db()
-        save_html_db(data)
-        return data
-
+        return _default_db()
     try:
         with open(HTML_DB_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-
         if not isinstance(data, dict):
-            raise ValueError("HTML database is not a dictionary")
-
+            return _default_db()
         data.setdefault("version", 1)
         data.setdefault("next_id", 1)
-        data.setdefault("items", {})
-
-        if not isinstance(data["items"], dict):
-            data["items"] = {}
-
+        data.setdefault("zips", {})
         return data
+    except Exception:
+        log.exception("Failed to load HTML DB")
+        return _default_db()
 
-    except Exception as e:
-        print("❌ HTML DB read error:", repr(e))
-        return _empty_db()
 
-
-def save_html_db(data):
+def _save_db(db):
+    _ensure_dirs()
     tmp = HTML_DB_FILE + ".tmp"
-
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
+        json.dump(db, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, HTML_DB_FILE)
 
 
-# =========================================================
-# ZIP SECURITY / EXTRACTION
-# =========================================================
+def _zip_path(zip_id):
+    return HTML_ROOT / f"{int(zip_id)}.zip"
 
-def _safe_zip_member(name):
-    name = name.replace("\\", "/")
 
-    if not name or name.startswith("/"):
+def _safe_filename(name):
+    name = os.path.basename(name or "")
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name)
+    return name[:180]
+
+
+def _safe_extract_zip(zip_path: Path, destination: Path):
+    """Extract safely; reject path traversal and suspicious symlinks."""
+    if not zipfile.is_zipfile(zip_path):
+        raise ValueError("فایل ZIP معتبر نیست.")
+
+    with zipfile.ZipFile(zip_path) as zf:
+        members = zf.infolist()
+        if not members:
+            raise ValueError("ZIP خالی است.")
+
+        total_uncompressed = 0
+        for info in members:
+            total_uncompressed += max(0, int(info.file_size))
+            normalized = os.path.normpath(info.filename.replace("\\", "/"))
+            if normalized.startswith("../") or normalized == ".." or normalized.startswith("/"):
+                raise ValueError("ZIP شامل مسیر غیرمجاز است.")
+            # Unix symlink bit.
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                raise ValueError("ZIP شامل symlink است و قابل قبول نیست.")
+
+        # Keep an explicit decompression ceiling too.
+        if total_uncompressed > 250 * 1024 * 1024:
+            raise ValueError("حجم استخراج‌شده ZIP بیش از حد مجاز است.")
+
+        destination.mkdir(parents=True, exist_ok=True)
+        zf.extractall(destination)
+
+
+def _find_index_file(root: Path):
+    candidates = []
+    for p in root.rglob("*"):
+        if p.is_file() and p.name.lower() in {"index.html", "index.htm"}:
+            candidates.append(p)
+    if not candidates:
+        raise ValueError("داخل ZIP فایل index.html یا index.htm پیدا نشد.")
+    # Prefer the shallowest index.
+    return sorted(candidates, key=lambda p: (len(p.relative_to(root).parts), str(p)))[0]
+
+
+def _validate_and_prepare_zip(source_zip: Path, zip_id: int):
+    """Validate ZIP and make sure its HTML root is renderable."""
+    work = Path(tempfile.mkdtemp(prefix=f"html_validate_{zip_id}_"))
+    try:
+        _safe_extract_zip(source_zip, work)
+        index = _find_index_file(work)
+        # Return the relative directory containing index.html.  We serve that directory.
+        return index.parent.relative_to(work).as_posix()
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _extract_for_serving(zip_id: int):
+    """Materialize a ZIP into /tmp/html_zips/rendered/<id>."""
+    zp = _zip_path(zip_id)
+    if not zp.exists():
+        raise FileNotFoundError(f"ZIP {zip_id} not found")
+
+    render_root = HTML_ROOT / "rendered" / str(zip_id)
+    if render_root.exists():
+        shutil.rmtree(render_root, ignore_errors=True)
+    render_root.mkdir(parents=True, exist_ok=True)
+    _safe_extract_zip(zp, render_root)
+    index = _find_index_file(render_root)
+    return render_root, index
+
+
+def _rebuild_rendered():
+    db = _load_db()
+    rendered_root = HTML_ROOT / "rendered"
+    rendered_root.mkdir(parents=True, exist_ok=True)
+    for item in rendered_root.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item, ignore_errors=True)
+        else:
+            item.unlink(missing_ok=True)
+
+    for key in list(db.get("zips", {})):
+        try:
+            _extract_for_serving(int(key))
+        except Exception:
+            log.exception("Could not rebuild HTML ZIP %s", key)
+
+
+# ---------------------------------------------------------------------------
+# Backup
+# ---------------------------------------------------------------------------
+
+
+def _make_backup_archive():
+    """Create a complete self-contained backup archive."""
+    _ensure_dirs()
+    db = _load_db()
+    _save_db(db)
+
+    tmp = HTML_BACKUP_FILE + ".tmp"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as out:
+        out.write(HTML_DB_FILE, arcname="html_database.json")
+        for key in sorted(db.get("zips", {}), key=lambda x: int(x)):
+            zp = _zip_path(int(key))
+            if zp.exists():
+                out.write(zp, arcname=f"zips/{int(key)}.zip")
+    os.replace(tmp, HTML_BACKUP_FILE)
+    return HTML_BACKUP_FILE
+
+
+def _restore_backup_archive(archive_path: str):
+    """Replace local HTML state from a complete backup archive."""
+    archive = Path(archive_path)
+    if not archive.exists() or not zipfile.is_zipfile(archive):
         return False
 
-    parts = Path(name).parts
+    temp = Path(tempfile.mkdtemp(prefix="html_restore_"))
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            names = zf.namelist()
+            if "html_database.json" not in names:
+                raise ValueError("فایل html_database.json در بکاپ وجود ندارد.")
+            for name in names:
+                normalized = os.path.normpath(name.replace("\\", "/"))
+                if normalized.startswith("../") or normalized == ".." or normalized.startswith("/"):
+                    raise ValueError("بکاپ شامل مسیر غیرمجاز است.")
+            zf.extractall(temp)
 
-    if ".." in parts:
+        with open(temp / "html_database.json", "r", encoding="utf-8") as f:
+            db = json.load(f)
+        if not isinstance(db, dict) or not isinstance(db.get("zips", {}), dict):
+            raise ValueError("ساختار دیتابیس HTML نامعتبر است.")
+
+        _ensure_dirs()
+        # Replace DB and ZIPs atomically-ish: only mutate after validation.
+        new_root = Path(tempfile.mkdtemp(prefix="html_state_"))
+        try:
+            (new_root / "zips").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(temp / "html_database.json", new_root / "html_database.json")
+            for key in db.get("zips", {}):
+                src = temp / "zips" / f"{int(key)}.zip"
+                if src.exists():
+                    shutil.copy2(src, new_root / "zips" / f"{int(key)}.zip")
+
+            # Move into place.
+            for old in HTML_ROOT.glob("*.zip"):
+                old.unlink(missing_ok=True)
+            for src in (new_root / "zips").glob("*.zip"):
+                shutil.copy2(src, HTML_ROOT / src.name)
+            shutil.copy2(new_root / "html_database.json", HTML_DB_FILE)
+        finally:
+            shutil.rmtree(new_root, ignore_errors=True)
+
+        _rebuild_rendered()
+        shutil.copy2(archive, HTML_BACKUP_FILE)
+        return True
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+
+
+def restore_latest_html_backup():
+    """Called from main during startup."""
+    _ensure_dirs()
+    if not HTML_BACKUP_CHAT_ID or _download_latest_file_from_telegram is None:
         return False
-
-    return True
-
-
-def _find_index_name(zf):
-    names = [
-        n.replace("\\", "/").lstrip("./")
-        for n in zf.namelist()
-        if not n.endswith("/")
-    ]
-
-    # اولویت با index.html در ریشه
-    for n in names:
-        if n.lower() == "index.html":
-            return n
-
-    # اگر zip یک پوشه اصلی داشته باشد:
-    # folder/index.html
-    candidates = [
-        n for n in names
-        if n.lower().endswith("/index.html")
-    ]
-
-    if candidates:
-        candidates.sort(key=lambda x: x.count("/"))
-        return candidates[0]
-
-    return None
-
-
-def _extract_zip_bytes(zip_bytes, target_dir):
-    if os.path.exists(target_dir):
-        shutil.rmtree(target_dir)
-
-    os.makedirs(target_dir, exist_ok=True)
-
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-
-        bad = [
-            name for name in zf.namelist()
-            if not _safe_zip_member(name)
-        ]
-
-        if bad:
-            raise ValueError(
-                "ZIP شامل مسیر غیرمجاز است."
-            )
-
-        index_name = _find_index_name(zf)
-
-        if not index_name:
-            raise ValueError(
-                "داخل ZIP فایل index.html پیدا نشد."
-            )
-
-        # اگر index داخل یک پوشه است، همان پوشه را به عنوان root
-        # سایت در نظر می‌گیریم.
-        prefix = ""
-        normalized_index = index_name.replace("\\", "/")
-
-        if normalized_index.lower() != "index.html":
-            prefix = normalized_index[
-                :normalized_index.lower().rfind("index.html")
-            ]
-
-        for member in zf.namelist():
-
-            member = member.replace("\\", "/")
-
-            if prefix and member.startswith(prefix):
-                relative = member[len(prefix):]
-            else:
-                relative = member
-
-            relative = relative.lstrip("/")
-
-            if not relative:
-                continue
-
-            if not _safe_zip_member(relative):
-                raise ValueError("مسیر غیرمجاز داخل ZIP.")
-
-            destination = os.path.abspath(
-                os.path.join(target_dir, relative)
-            )
-
-            root = os.path.abspath(target_dir)
-
-            if not (
-                destination == root
-                or destination.startswith(root + os.sep)
-            ):
-                raise ValueError("ZIP path traversal detected.")
-
-            if member.endswith("/"):
-                os.makedirs(destination, exist_ok=True)
-                continue
-
-            os.makedirs(
-                os.path.dirname(destination),
-                exist_ok=True
-            )
-
-            with zf.open(member) as src, open(
-                destination, "wb"
-            ) as dst:
-                shutil.copyfileobj(src, dst)
-
-    final_index = os.path.join(target_dir, "index.html")
-
-    if not os.path.isfile(final_index):
-        raise ValueError(
-            "بعد از استخراج، index.html در ریشه سایت پیدا نشد."
+    try:
+        ok = _download_latest_file_from_telegram(
+            chat_id=HTML_BACKUP_CHAT_ID,
+            filename="html_backup.zip",
+            save_path=HTML_BACKUP_FILE,
         )
+        if ok:
+            return _restore_backup_archive(HTML_BACKUP_FILE)
+    except Exception:
+        log.exception("Failed to restore HTML backup from Telegram")
+    return False
 
 
-# =========================================================
-# BACKUP
-# =========================================================
-
-def _build_backup_zip():
-    """
-    html_backup.zip شامل:
-      html_database.json
-      pages/<id>.zip
-    """
-    db = load_html_db()
-
-    buffer = io.BytesIO()
-
-    with zipfile.ZipFile(
-        buffer,
-        "w",
-        zipfile.ZIP_DEFLATED
-    ) as zf:
-
-        zf.writestr(
-            "html_database.json",
-            json.dumps(
-                db,
-                ensure_ascii=False,
-                indent=2
-            ).encode("utf-8")
-        )
-
-        for item_id in db.get("items", {}):
-            zip_path = os.path.join(
-                HTML_ROOT,
-                f"{item_id}.zip"
-            )
-
-            if os.path.isfile(zip_path):
-                zf.write(
-                    zip_path,
-                    arcname=f"pages/{item_id}.zip"
-                )
-
-    buffer.seek(0)
-
-    with open(HTML_BACKUP_FILE, "wb") as f:
-        f.write(buffer.getvalue())
-
-    return buffer.getvalue()
-
-
-def _split_text(text, max_len=3500):
-    chunks = []
-
-    while text:
-        chunks.append(text[:max_len])
-        text = text[max_len:]
-
+def _split_text(text, max_len=HTML_LOG_MAX):
+    text = str(text or "")
+    if len(text) <= max_len:
+        return [text]
+    chunks, current = [], []
+    size = 0
+    for line in text.splitlines(True):
+        if size + len(line) > max_len and current:
+            chunks.append("".join(current))
+            current, size = [], 0
+        # hard split an individual oversized line
+        while len(line) > max_len:
+            chunks.append(line[:max_len])
+            line = line[max_len:]
+        if line:
+            current.append(line)
+            size += len(line)
+    if current:
+        chunks.append("".join(current))
     return chunks or [""]
 
 
-def _admin_log(admin, reason):
-    name = html.escape(
-        getattr(admin, "full_name", None)
-        or "بدون نام"
-    )
-    username = getattr(admin, "username", None)
-    user_id = getattr(admin, "id", "نامشخص")
-
-    username_text = (
-        f"@{html.escape(username)}"
-        if username
-        else "ندارد"
-    )
-
-    return (
-        "👤 <b>ادمین:</b> "
-        f"{name}\n"
-        f"🆔 <code>{user_id}</code>\n"
-        f"🔗 {username_text}\n\n"
-        f"📝 <b>دلیل:</b>\n{reason}"
-    )
+def _admin_html_name(user):
+    if not user:
+        return "ادمین نامشخص"
+    name = user.full_name or "بدون نام"
+    return f'<a href="tg://user?id={user.id}">{name}</a>'
 
 
-def backup_html_database(admin, reason):
-    """
-    بعد از هر تغییر، html_backup.zip را به گروه HTML_BACKUP می‌فرستد
-    و گزارش تغییر را به صورت reply روی همان فایل می‌فرستد.
-    """
-    if not HTML_BACKUP_CHAT_ID:
-        print("⚠️ HTML_BACKUP_CHAT_ID تنظیم نشده.")
+def _backup_caption(user, reason):
+    return f"<b>HTML BACKUP</b>\n👤 ادمین: {_admin_html_name(user)}\n📝 دلیل: {reason}"
+
+
+def _backup_and_log(user, reason):
+    """Synchronous because main's Telethon bridge is synchronous."""
+    if not HTML_BACKUP_CHAT_ID or _upload_file_to_telegram is None:
+        log.warning("HTML backup chat/helper is not configured")
         return False
 
     try:
-        _build_backup_zip()
-
-        caption = (
-            "📦 <b>HTML BACKUP</b>\n"
-            "آخرین نسخه بکاپ جزوه‌های HTML"
+        backup_path = _make_backup_archive()
+        backup_msg = _upload_file_to_telegram(
+            HTML_BACKUP_CHAT_ID,
+            backup_path,
+            caption="📦 html_backup.zip",
+            parse_mode="HTML",
         )
-
-        async def upload():
-            return await _telethon_client().send_file(
-                HTML_BACKUP_CHAT_ID,
-                HTML_BACKUP_FILE,
-                caption=caption,
-                parse_mode="HTML"
-            )
-
-        message = _run_telethon(upload())
-
-        if not message:
-            print("❌ HTML backup upload failed.")
+        if not backup_msg:
             return False
-
-        msg_id = getattr(message, "id", None)
-
-        if msg_id:
-            log_text = _admin_log(admin, reason)
-
-            async def send_logs():
-                for chunk in _split_text(log_text):
-                    await _telethon_client().send_message(
-                        HTML_BACKUP_CHAT_ID,
-                        chunk,
-                        parse_mode="HTML",
-                        link_preview=False,
-                        reply_to=msg_id
+        msg_id = getattr(backup_msg, "id", None)
+        if msg_id and _run_telethon and _telethon_client:
+            for chunk in _split_text(_backup_caption(user, reason)):
+                try:
+                    _run_telethon(
+                        _telethon_client.send_message(
+                            entity=HTML_BACKUP_CHAT_ID,
+                            message=chunk,
+                            parse_mode="HTML",
+                            link_preview=False,
+                            reply_to=msg_id,
+                        )
                     )
-
-            _run_telethon(send_logs())
-
+                except Exception:
+                    log.exception("Failed to send HTML backup log")
         return True
-
-    except Exception as e:
-        print("❌ HTML backup error:", repr(e))
+    except Exception:
+        log.exception("HTML backup failed")
         return False
 
 
-async def _download_latest_html_backup():
-    if not HTML_BACKUP_CHAT_ID:
-        return False
-
-    try:
-        client = _telethon_client()
-
-        async def find_and_download():
-            async for message in client.iter_messages(
-                HTML_BACKUP_CHAT_ID,
-                limit=300
-            ):
-                if not message.file:
-                    continue
-
-                filename = (
-                    message.file.name
-                    if message.file.name
-                    else ""
-                )
-
-                caption = message.message or ""
-
-                if (
-                    filename == "html_backup.zip"
-                    or "HTML BACKUP" in caption
-                ):
-                    await message.download_media(
-                        file=HTML_BACKUP_FILE
-                    )
-                    return True
-
-            return False
-
-        return bool(_run_telethon(find_and_download()))
-
-    except Exception as e:
-        print("❌ HTML backup download error:", repr(e))
-        return False
+# ---------------------------------------------------------------------------
+# Admin helpers / keyboards
+# ---------------------------------------------------------------------------
 
 
-def restore_html_database():
-    """
-    آخرین html_backup.zip را از گروه می‌گیرد و
-    دیتابیس + zipهای صفحات را جایگزین می‌کند.
-    """
-    if not os.path.exists(HTML_BACKUP_FILE):
-        ok = _download_latest_html_backup()
-        if not ok:
-            print("ℹ️ HTML backup پیدا نشد؛ دیتابیس جدید ساخته می‌شود.")
-            save_html_db(_empty_db())
-            return False
-
-    try:
-        with zipfile.ZipFile(
-            HTML_BACKUP_FILE,
-            "r"
-        ) as zf:
-
-            names = set(zf.namelist())
-
-            if "html_database.json" not in names:
-                raise ValueError(
-                    "html_backup.zip فاقد html_database.json است."
-                )
-
-            raw_db = zf.read("html_database.json")
-            data = json.loads(raw_db.decode("utf-8"))
-
-            if not isinstance(data, dict):
-                raise ValueError("HTML DB نامعتبر است.")
-
-            data.setdefault("version", 1)
-            data.setdefault("next_id", 1)
-            data.setdefault("items", {})
-
-            # پاک کردن صفحات فعلی
-            if os.path.exists(HTML_ROOT):
-                shutil.rmtree(HTML_ROOT)
-
-            os.makedirs(HTML_ROOT, exist_ok=True)
-
-            save_html_db(data)
-
-            # استخراج zip هر جزوه
-            for item_id in data.get("items", {}):
-                member = f"pages/{item_id}.zip"
-
-                if member not in names:
-                    print(
-                        f"⚠️ ZIP برای HTML {item_id} در backup نیست."
-                    )
-                    continue
-
-                zip_bytes = zf.read(member)
-
-                zip_path = os.path.join(
-                    HTML_ROOT,
-                    f"{item_id}.zip"
-                )
-
-                with open(zip_path, "wb") as f:
-                    f.write(zip_bytes)
-
-                target_dir = os.path.join(
-                    HTML_ROOT,
-                    str(item_id)
-                )
-
-                _extract_zip_bytes(
-                    zip_bytes,
-                    target_dir
-                )
-
-        print("✅ HTML database restored.")
+def _is_admin(user_id):
+    if int(user_id) in ADMIN_IDS:
         return True
+    if _get_userdata is not None:
+        try:
+            userdata = _get_userdata()
+            return int(user_id) in {int(x) for x in userdata.get("sub_admins", [])}
+        except Exception:
+            pass
+    return False
 
-    except Exception as e:
-        print("❌ HTML restore error:", repr(e))
-        return False
+
+def _html_base_url():
+    return HTML_WEBHOOK_URL + "/html"
 
 
-# =========================================================
-# UPLOAD NEW HTML ZIP
-# =========================================================
+def _public_url(zip_id):
+    return f"{_html_base_url()}/{int(zip_id)}"
+
+
+def _sorted_items():
+    db = _load_db()
+    items = []
+    for key, item in db.get("zips", {}).items():
+        try:
+            zid = int(key)
+        except Exception:
+            continue
+        item = dict(item)
+        item["id"] = zid
+        items.append(item)
+    items.sort(key=lambda x: x["id"])
+    return items
+
+
+def _manage_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 زیپ‌های موجود", callback_data="html_list_0")],
+        [InlineKeyboardButton("➕ وارد کردن زیپ جدید", callback_data="html_import")],
+        [InlineKeyboardButton("🗑 حذف زیپ", callback_data="html_delete_0")],
+        [InlineKeyboardButton("🧹 حذف همه زیپ‌ها", callback_data="html_delete_all_confirm")],
+        [InlineKeyboardButton("📤 دریافت بکاپ", callback_data="html_get_backup")],
+        [InlineKeyboardButton("📥 وارد کردن بکاپ", callback_data="html_import_backup")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="html_back_admin")],
+    ])
+
+
+def _paged_zip_keyboard(action, page):
+    items = _sorted_items()
+    start = page * HTML_PAGE_SIZE
+    page_items = items[start:start + HTML_PAGE_SIZE]
+    keyboard = []
+    for item in page_items:
+        label = f"#{item['id']} — {item.get('name', 'بدون نام')}"
+        if action == "list":
+            cb = f"html_show_{item['id']}_{page}"
+        else:
+            cb = f"html_delete_pick_{item['id']}_{page}"
+        keyboard.append([InlineKeyboardButton(label[:60], callback_data=cb)])
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"html_{action}_{page - 1}"))
+    if start + HTML_PAGE_SIZE < len(items):
+        nav.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"html_{action}_{page + 1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="html_manage")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _backup_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="html_manage")],
+        [InlineKeyboardButton("❌ لغو عملیات", callback_data="html_cancel")],
+    ])
+
+
+# ---------------------------------------------------------------------------
+# /html upload flow
+# ---------------------------------------------------------------------------
+
 
 async def html_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(update.effective_user.id):
-        return
-
-    context.user_data["html_waiting"] = "zip"
-
+        return ConversationHandler.END
+    context.user_data.pop("html_pending_zip", None)
     await update.message.reply_text(
-        "📦 ZIP جزوه HTML را بفرستید.\n\n"
-        "ZIP باید شامل <code>index.html</code> و تمام "
-        "فایل‌های موردنیاز مثل CSS، JS و تصاویر باشد.\n\n"
-        "برای لغو: /cancel",
-        parse_mode="HTML"
+        "📦 زیپ HTML را بفرستید.\n\nبرای لغو، /cancel را بزنید.",
+        reply_markup=ReplyKeyboardMarkup([["❌ لغو عملیات"]], resize_keyboard=True),
     )
+    return HTML_WAIT_ZIP
 
 
-async def html_receive_zip(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if context.user_data.get("html_waiting") != "zip":
-        return
-
+async def html_receive_zip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(update.effective_user.id):
-        return
+        return ConversationHandler.END
+
+    if update.message.text and update.message.text.strip().lower() in {"/cancel", "❌ لغو عملیات"}:
+        return await html_cancel(update, context)
 
     document = update.message.document
-
     if not document:
-        return
+        await update.message.reply_text("❌ لطفاً فایل ZIP را به‌صورت فایل (Document) ارسال کنید.")
+        return HTML_WAIT_ZIP
 
-    filename = (document.file_name or "").lower()
+    file_name = (document.file_name or "").lower()
+    if not file_name.endswith(".zip"):
+        await update.message.reply_text("❌ فقط فایل ZIP قابل قبول است. دوباره ارسال کنید.")
+        return HTML_WAIT_ZIP
+    if document.file_size and document.file_size > HTML_MAX_ZIP_BYTES:
+        await update.message.reply_text("❌ حجم ZIP بیشتر از حد مجاز است.")
+        return HTML_WAIT_ZIP
 
-    if not filename.endswith(".zip"):
-        await update.message.reply_text(
-            "❌ فقط فایل ZIP بفرستید.\n"
-            "برای لغو: /cancel"
-        )
-        raise ApplicationHandlerStop
-
+    tmp_dir = Path(tempfile.mkdtemp(prefix="html_upload_"))
+    tmp_zip = tmp_dir / _safe_filename(document.file_name or "upload.zip")
     try:
         tg_file = await document.get_file()
-        data = bytes(
-            await tg_file.download_as_bytearray()
+        await tg_file.download_to_drive(custom_path=str(tmp_zip))
+        # Validate before asking for the name.
+        _validate_and_prepare_zip(tmp_zip, 0)
+        context.user_data["html_pending_zip"] = str(tmp_zip)
+        context.user_data["html_pending_zip_tmp"] = str(tmp_dir)
+        await update.message.reply_text(
+            "✅ زیپ دریافت و بررسی شد.\n\n📚 اسم جزوه را بفرستید.\nبرای لغو، /cancel را بزنید."
         )
+        return HTML_WAIT_NAME
+    except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        await update.message.reply_text(f"❌ زیپ قابل استفاده نیست:\n{e}")
+        return HTML_WAIT_ZIP
 
-        # تست و استخراج در یک فولدر موقت
-        temp_id = "__temp__"
-        temp_dir = os.path.join(
-            HTML_ROOT,
-            temp_id
+
+async def html_receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return ConversationHandler.END
+    name = (update.message.text or "").strip()
+    if name.lower() == "/cancel" or name == "❌ لغو عملیات":
+        return await html_cancel(update, context)
+    if not name:
+        await update.message.reply_text("❌ اسم جزوه نمی‌تواند خالی باشد.")
+        return HTML_WAIT_NAME
+    if len(name) > 120:
+        await update.message.reply_text("❌ اسم جزوه حداکثر ۱۲۰ کاراکتر باشد.")
+        return HTML_WAIT_NAME
+
+    pending = context.user_data.get("html_pending_zip")
+    tmp_dir = context.user_data.get("html_pending_zip_tmp")
+    if not pending or not os.path.exists(pending):
+        await update.message.reply_text("❌ فایل موقت پیدا نشد. دوباره /html را اجرا کنید.", reply_markup=ReplyKeyboardRemove())
+        return ConversationHandler.END
+
+    db = _load_db()
+    zip_id = int(db.get("next_id", 1))
+    while str(zip_id) in db.get("zips", {}):
+        zip_id += 1
+    final_zip = _zip_path(zip_id)
+
+    try:
+        # Copy first, validate the final file again, then save DB.
+        shutil.copy2(pending, final_zip)
+        index_dir = _validate_and_prepare_zip(final_zip, zip_id)
+        db.setdefault("zips", {})[str(zip_id)] = {
+            "id": zip_id,
+            "name": name,
+            "filename": _safe_filename(os.path.basename(pending)),
+            "index_dir": index_dir,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        db["next_id"] = zip_id + 1
+        _save_db(db)
+        _extract_for_serving(zip_id)
+
+        reason = f"افزودن زیپ جدید: <b>{_escape(name)}</b>\n🔗 لینک: {_public_url(zip_id)}"
+        backup_ok = _backup_and_log(update.effective_user, reason)
+
+        await update.message.reply_text(
+            "✅ جزوه با موفقیت ثبت شد.\n\n"
+            f"📚 نام: <b>{_escape(name)}</b>\n"
+            f"🔢 شناسه: <code>{zip_id}</code>\n"
+            f"🔗 لینک: {_public_url(zip_id)}\n\n"
+            + ("☁️ بکاپ هم به‌روزرسانی شد." if backup_ok else "⚠️ بکاپ در تلگرام ارسال نشد؛ تنظیمات HTML_BACKUP_CHAT_ID را بررسی کنید."),
+            parse_mode="HTML",
+            disable_web_page_preview=False,
+            reply_markup=ReplyKeyboardRemove(),
         )
+    except Exception as e:
+        final_zip.unlink(missing_ok=True)
+        await update.message.reply_text(f"❌ ثبت جزوه انجام نشد:\n{e}", reply_markup=ReplyKeyboardRemove())
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        context.user_data.pop("html_pending_zip", None)
+        context.user_data.pop("html_pending_zip_tmp", None)
 
-        _extract_zip_bytes(data, temp_dir)
+    return ConversationHandler.END
 
+
+async def html_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tmp_dir = context.user_data.pop("html_pending_zip_tmp", None)
+    context.user_data.pop("html_pending_zip", None)
+    if tmp_dir:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=ReplyKeyboardRemove())
+    return ConversationHandler.END
+
+
+# ---------------------------------------------------------------------------
+# Admin panel callbacks
+# ---------------------------------------------------------------------------
+
+
+def _escape(text):
+    import html
+    return html.escape(str(text), quote=True)
+
+
+async def html_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔️ دسترسی ادمین ندارید.", show_alert=True)
+        return
+
+    data = query.data or ""
+    try:
+        if data == "html_manage":
+            context.user_data["admin_panel"] = "html"
+            await query.message.edit_text("🧩 مدیریت HTML:", reply_markup=_manage_keyboard())
+            return
+
+        if data == "html_back_admin":
+            context.user_data["admin_panel"] = "access"
+            # main's admin panel can be reopened with admin_access.
+            await query.message.edit_text("🔐 برای برگشت به پنل اصلی، دوباره پنل مدیریت را باز کنید.", reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 پنل مدیریت", callback_data="admin_access")]
+            ]))
+            return
+
+        if data == "html_cancel":
+            context.user_data.pop("html_pending_zip", None)
+            context.user_data.pop("html_pending_zip_tmp", None)
+            await query.message.edit_text("❌ عملیات لغو شد.", reply_markup=_manage_keyboard())
+            return
+
+        if data == "html_import":
+            await query.message.reply_text("📦 برای افزودن زیپ جدید /html را بزنید.")
+            return
+
+        if data.startswith("html_list_"):
+            page = int(data.rsplit("_", 1)[1])
+            items = _sorted_items()
+            if not items:
+                await query.message.edit_text("📦 هنوز هیچ زیپی ثبت نشده است.", reply_markup=_manage_keyboard())
+                return
+            await query.message.edit_text(f"📦 زیپ‌های موجود — صفحه {page + 1}", reply_markup=_paged_zip_keyboard("list", page))
+            return
+
+        if data.startswith("html_show_"):
+            parts = data.split("_")
+            zip_id, page = int(parts[2]), int(parts[3])
+            item = _load_db().get("zips", {}).get(str(zip_id))
+            if not item:
+                await query.answer("این زیپ دیگر وجود ندارد.", show_alert=True)
+                return
+            text = (
+                f"📦 <b>{_escape(item.get('name', 'بدون نام'))}</b>\n"
+                f"🔢 شناسه: <code>{zip_id}</code>\n"
+                f"🔗 {_public_url(zip_id)}\n"
+                f"🕒 {item.get('created_at', '-') }"
+            )
+            await query.message.edit_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 ارسال لینک", callback_data=f"html_send_{zip_id}")],
+                [InlineKeyboardButton("🔙 بازگشت", callback_data=f"html_list_{page}")],
+            ]))
+            return
+
+        if data.startswith("html_send_"):
+            zip_id = int(data.rsplit("_", 1)[1])
+            item = _load_db().get("zips", {}).get(str(zip_id))
+            if not item:
+                await query.answer("زیپ پیدا نشد.", show_alert=True)
+                return
+            await query.message.reply_text(
+                f"📚 <b>{_escape(item.get('name', 'بدون نام'))}</b>\n🔗 {_public_url(zip_id)}",
+                parse_mode="HTML",
+                disable_web_page_preview=False,
+            )
+            return
+
+        if data.startswith("html_delete_") and data != "html_delete_all_confirm":
+            if data.startswith("html_delete_0"):
+                page = int(data.rsplit("_", 1)[1])
+                items = _sorted_items()
+                if not items:
+                    await query.message.edit_text("🗑 زیپی برای حذف وجود ندارد.", reply_markup=_manage_keyboard())
+                    return
+                await query.message.edit_text(f"🗑 حذف زیپ — صفحه {page + 1}", reply_markup=_paged_zip_keyboard("delete", page))
+                return
+
+        if data.startswith("html_delete_pick_"):
+            parts = data.split("_")
+            zip_id, page = int(parts[3]), int(parts[4])
+            item = _load_db().get("zips", {}).get(str(zip_id))
+            if not item:
+                await query.answer("زیپ پیدا نشد.", show_alert=True)
+                return
+            await query.message.edit_text(
+                f"⚠️ حذف شود؟\n\n📚 <b>{_escape(item.get('name', 'بدون نام'))}</b>\n🔗 {_public_url(zip_id)}",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ بله، حذف کن", callback_data=f"html_delete_yes_{zip_id}_{page}")],
+                    [InlineKeyboardButton("❌ لغو", callback_data=f"html_delete_{page}")],
+                ]),
+            )
+            return
+
+        if data.startswith("html_delete_yes_"):
+            parts = data.split("_")
+            zip_id, page = int(parts[3]), int(parts[4])
+            db = _load_db()
+            item = db.get("zips", {}).get(str(zip_id))
+            if not item:
+                await query.answer("زیپ قبلاً حذف شده است.", show_alert=True)
+                return
+            name = item.get("name", "بدون نام")
+            del db["zips"][str(zip_id)]
+            _save_db(db)
+            _zip_path(zip_id).unlink(missing_ok=True)
+            rendered = HTML_ROOT / "rendered" / str(zip_id)
+            shutil.rmtree(rendered, ignore_errors=True)
+            backup_ok = _backup_and_log(query.from_user, f"حذف زیپ: <b>{_escape(name)}</b>\n🔗 لینک قبلی: {_public_url(zip_id)}")
+            await query.message.edit_text(
+                f"✅ زیپ «{_escape(name)}» حذف شد.\n" + ("☁️ بکاپ به‌روزرسانی شد." if backup_ok else "⚠️ بکاپ ارسال نشد."),
+                parse_mode="HTML",
+                reply_markup=_paged_zip_keyboard("delete", page) if _sorted_items() else _manage_keyboard(),
+            )
+            return
+
+        if data == "html_delete_all_confirm":
+            items = _sorted_items()
+            if not items:
+                await query.message.edit_text("🧹 هیچ زیپی وجود ندارد.", reply_markup=_manage_keyboard())
+                return
+            await query.message.edit_text(
+                f"⚠️ این عملیات همه {len(items)} زیپ را حذف می‌کند. مطمئن هستید؟",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🧹 بله، همه را حذف کن", callback_data="html_delete_all_yes")],
+                    [InlineKeyboardButton("❌ لغو", callback_data="html_manage")],
+                ]),
+            )
+            return
+
+        if data == "html_delete_all_yes":
+            items = _sorted_items()
+            names = [str(x.get("name", "بدون نام")) for x in items]
+            db = _default_db()
+            _save_db(db)
+            for p in HTML_ROOT.glob("*.zip"):
+                p.unlink(missing_ok=True)
+            shutil.rmtree(HTML_ROOT / "rendered", ignore_errors=True)
+            reason = "حذف همه زیپ‌ها:\n" + "\n".join(f"• {_escape(n)}" for n in names)
+            backup_ok = _backup_and_log(query.from_user, reason)
+            await query.message.edit_text(
+                f"✅ همه {len(items)} زیپ حذف شدند.\n" + ("☁️ بکاپ به‌روزرسانی شد." if backup_ok else "⚠️ بکاپ ارسال نشد."),
+                parse_mode="HTML",
+                reply_markup=_manage_keyboard(),
+            )
+            return
+
+        if data == "html_get_backup":
+            if not HTML_BACKUP_CHAT_ID:
+                await query.answer("HTML_BACKUP_CHAT_ID تنظیم نشده است.", show_alert=True)
+                return
+            _make_backup_archive()
+            await query.message.reply_document(
+                document=HTML_BACKUP_FILE,
+                filename="html_backup.zip",
+                caption="📦 بکاپ کامل HTML",
+            )
+            return
+
+        if data == "html_import_backup":
+            context.user_data["html_waiting_backup"] = True
+            await query.message.reply_text(
+                "📥 فایل html_backup.zip را ارسال کنید.\nبرای لغو /cancel را بزنید.",
+                reply_markup=ReplyKeyboardMarkup([["❌ لغو عملیات"]], resize_keyboard=True),
+            )
+            return
+
+        if data.startswith("html_list_") or data.startswith("html_delete_"):
+            return
+    except Exception:
+        log.exception("HTML admin callback failed: %s", data)
+        await query.message.reply_text("❌ اجرای عملیات HTML با خطا مواجه شد.")
+
+
+async def html_receive_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("html_waiting_backup"):
+        return
+    if not _is_admin(update.effective_user.id):
+        return
+    if update.message.text and update.message.text.strip().lower() in {"/cancel", "❌ لغو عملیات"}:
+        context.user_data.pop("html_waiting_backup", None)
+        await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=ReplyKeyboardRemove())
+        return
+
+    doc = update.message.document
+    if not doc:
+        await update.message.reply_text("❌ لطفاً فایل html_backup.zip را ارسال کنید.")
+        return
+    if not (doc.file_name or "").lower().endswith(".zip"):
+        await update.message.reply_text("❌ فقط ZIP قابل قبول است.")
+        return
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="html_backup_upload_"))
+    uploaded = temp_dir / "html_backup.zip"
+    try:
+        tg_file = await doc.get_file()
+        await tg_file.download_to_drive(custom_path=str(uploaded))
+        if not _restore_backup_archive(str(uploaded)):
+            raise ValueError("ساختار بکاپ معتبر نیست.")
+        # Keep exact latest imported backup as local backup source.
+        shutil.copy2(uploaded, HTML_BACKUP_FILE)
+        context.user_data.pop("html_waiting_backup", None)
+        backup_ok = _backup_and_log(update.effective_user, "جایگزینی فایل HTML BACKUP")
+        await update.message.reply_text(
+            "✅ بکاپ HTML با موفقیت جایگزین شد.\n" + ("☁️ نسخه جدید در گروه بکاپ هم ثبت شد." if backup_ok else "⚠️ ارسال نسخه جدید به گروه بکاپ ناموفق بود."),
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ وارد کردن بکاپ ناموفق بود:\n{e}")
+    finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-        context.user_data["html_zip_bytes"] = data
-        context.user_data["html_original_filename"] = document.file_name
-        context.user_data["html_waiting"] = "name"
 
-        await update.message.reply_text(
-            "✅ ZIP دریافت شد.\n\n"
-            "📚 حالا اسم جزوه را بفرستید.\n"
-            "برای لغو: /cancel"
-        )
-
-    except zipfile.BadZipFile:
-        await update.message.reply_text(
-            "❌ فایل ZIP معتبر نیست.\n"
-            "دوباره ZIP را بفرستید یا /cancel."
-        )
-
-    except Exception as e:
-        print("❌ HTML ZIP validation error:", repr(e))
-        await update.message.reply_text(
-            f"❌ ZIP قابل استفاده نیست:\n{e}"
-        )
-
-    raise ApplicationHandlerStop
+# ---------------------------------------------------------------------------
+# HTTP serving: /html/<id> and /html/<id>/...
+# ---------------------------------------------------------------------------
 
 
-async def html_receive_name(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if context.user_data.get("html_waiting") != "name":
-        return
-
-    if not _is_admin(update.effective_user.id):
-        return
-
-    name = (update.message.text or "").strip()
-
-    if not name:
-        await update.message.reply_text(
-            "❌ اسم جزوه نمی‌تواند خالی باشد."
-        )
-        raise ApplicationHandlerStop
-
-    zip_bytes = context.user_data.get("html_zip_bytes")
-
-    if not zip_bytes:
-        context.user_data.pop("html_waiting", None)
-        await update.message.reply_text(
-            "❌ فایل ZIP موقت پیدا نشد. دوباره /html را بزنید."
-        )
-        raise ApplicationHandlerStop
-
+async def html_http_handler(request: web.Request):
+    """Serve the selected HTML ZIP without exposing /tmp paths."""
     try:
-        db = load_html_db()
-
-        item_id = int(db.get("next_id", 1))
-
-        while str(item_id) in db.get("items", {}):
-            item_id += 1
-
-        db["next_id"] = item_id + 1
-
-        zip_path = os.path.join(
-            HTML_ROOT,
-            f"{item_id}.zip"
-        )
-
-        page_dir = os.path.join(
-            HTML_ROOT,
-            str(item_id)
-        )
-
-        with open(zip_path, "wb") as f:
-            f.write(zip_bytes)
-
-        _extract_zip_bytes(
-            zip_bytes,
-            page_dir
-        )
-
-        db["items"][str(item_id)] = {
-            "id": item_id,
-            "name": name,
-            "zip_filename": f"{item_id}.zip",
-            "url": f"{HTML_BASE_URL}/{item_id}/",
-        }
-
-        save_html_db(db)
-
-        link = f"{HTML_BASE_URL}/{item_id}/"
-
-        reason = (
-            "➕ <b>افزودن جزوه HTML</b>\n"
-            f"📚 نام: {html.escape(name)}\n"
-            f"🔢 ID: <code>{item_id}</code>\n"
-            f"🔗 لینک: {html.escape(link)}"
-        )
-
-        backup_html_database(
-            update.effective_user,
-            reason
-        )
-
-        await update.message.reply_text(
-            "✅ جزوه HTML با موفقیت ثبت شد.\n\n"
-            f"📚 <b>{html.escape(name)}</b>\n"
-            f"🔗 {html.escape(link)}",
-            parse_mode="HTML"
-        )
-
-    except Exception as e:
-        print("❌ HTML create error:", repr(e))
-        await update.message.reply_text(
-            f"❌ خطا در ثبت جزوه:\n{e}"
-        )
-
-    finally:
-        for key in (
-            "html_waiting",
-            "html_zip_bytes",
-            "html_original_filename"
-        ):
-            context.user_data.pop(key, None)
-
-    raise ApplicationHandlerStop
-
-
-async def html_cancel(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    waiting = context.user_data.get("html_waiting")
-
-    if not waiting:
-        return
-
-    for key in (
-        "html_waiting",
-        "html_zip_bytes",
-        "html_original_filename"
-    ):
-        context.user_data.pop(key, None)
-
-    await update.message.reply_text(
-        "❌ عملیات HTML لغو شد."
-    )
-
-    raise ApplicationHandlerStop
-
-
-# =========================================================
-# ADMIN PANEL KEYBOARDS
-# =========================================================
-
-def html_admin_keyboard():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "📦 زیپ‌های موجود",
-                callback_data="admin_html_list"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "➕ وارد کردن زیپ جدید",
-                callback_data="admin_html_import"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🗑 حذف زیپ",
-                callback_data="admin_html_delete"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🔥 حذف همه زیپ‌ها",
-                callback_data="admin_html_delete_all"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📤 دریافت بکاپ",
-                callback_data="admin_html_get_backup"
-            ),
-            InlineKeyboardButton(
-                "📥 وارد کردن بکاپ",
-                callback_data="admin_html_import_backup"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🔙 بازگشت",
-                callback_data="admin_back_access"
-            )
-        ]
-    ])
-
-
-def _paged_buttons(items, action, page=0):
-    total = len(items)
-    start = page * PAGE_SIZE
-    end = start + PAGE_SIZE
-
-    keyboard = []
-
-    for item in items[start:end]:
-        item_id = item["id"]
-        name = str(item["name"])[:35]
-
-        keyboard.append([
-            InlineKeyboardButton(
-                f"📚 {name}",
-                callback_data=f"admin_html_{action}_{item_id}"
-            )
-        ])
-
-    total_pages = max(
-        1,
-        (total + PAGE_SIZE - 1) // PAGE_SIZE
-    )
-
-    nav = []
-
-    if page > 0:
-        nav.append(
-            InlineKeyboardButton(
-                "⬅️ صفحه قبل",
-                callback_data=(
-                    f"admin_html_{action}_page_{page - 1}"
-                )
-            )
-        )
-
-    if end < total:
-        nav.append(
-            InlineKeyboardButton(
-                "➡️ صفحه بعد",
-                callback_data=(
-                    f"admin_html_{action}_page_{page + 1}"
-                )
-            )
-        )
-
-    if nav:
-        keyboard.append(nav)
-
-    keyboard.append([
-        InlineKeyboardButton(
-            "🔙 بازگشت",
-            callback_data="admin_html_panel"
-        )
-    ])
-
-    return InlineKeyboardMarkup(keyboard), total_pages
-
-
-async def _show_html_list(query, action, page=0):
-    db = load_html_db()
-
-    items = list(db.get("items", {}).values())
-    items.sort(
-        key=lambda x: int(x.get("id", 0))
-    )
-
-    if not items:
-        await query.message.edit_text(
-            "📭 هنوز هیچ جزوه HTML ثبت نشده است.",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "🔙 بازگشت",
-                        callback_data="admin_html_panel"
-                    )
-                ]
-            ])
-        )
-        return
-
-    keyboard, total_pages = _paged_buttons(
-        items,
-        action,
-        page
-    )
-
-    title = (
-        "📦 زیپ‌های موجود"
-        if action == "open"
-        else "🗑 انتخاب زیپ برای حذف"
-    )
-
-    await query.message.edit_text(
-        f"{title}\n\n"
-        f"📄 صفحه {page + 1} از {total_pages}",
-        reply_markup=keyboard
-    )
-
-
-async def html_admin_callback(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    query = update.callback_query
-    data = query.data
-
-    if not _is_admin(query.from_user.id):
-        await query.answer(
-            "⛔️ دسترسی ندارید.",
-            show_alert=True
-        )
-        return
-
-    await query.answer()
-
-    # ---------------- پنل ----------------
-    if data == "admin_html_panel":
-        await query.message.edit_text(
-            "🌐 <b>مدیریت HTML</b>\n\n"
-            "از گزینه موردنظر استفاده کنید:",
-            parse_mode="HTML",
-            reply_markup=html_admin_keyboard()
-        )
-        return
-
-    # ---------------- لیست ----------------
-    if data == "admin_html_list":
-        await _show_html_list(query, "open", 0)
-        return
-
-    if data.startswith("admin_html_open_page_"):
-        page = int(data.rsplit("_", 1)[-1])
-        await _show_html_list(query, "open", page)
-        return
-
-    # ---------------- باز کردن لینک ----------------
-    if data.startswith("admin_html_open_"):
-        item_id = int(data.rsplit("_", 1)[-1])
-        db = load_html_db()
-        item = db.get("items", {}).get(str(item_id))
-
-        if not item:
-            await query.answer(
-                "❌ جزوه پیدا نشد.",
-                show_alert=True
-            )
-            return
-
-        await query.message.reply_text(
-            "🔗 لینک جزوه:\n"
-            f"{item['url']}\n\n"
-            f"📚 {html.escape(item['name'])}",
-            parse_mode="HTML"
-        )
-        return
-
-    # ---------------- وارد کردن از پنل ----------------
-    if data == "admin_html_import":
-        context.user_data["html_waiting"] = "zip"
-
-        await query.message.reply_text(
-            "📦 ZIP جزوه HTML را بفرستید.\n"
-            "برای لغو: /cancel"
-        )
-        return
-
-    # ---------------- حذف ----------------
-    if data == "admin_html_delete":
-        await _show_html_list(query, "delete", 0)
-        return
-
-    if data.startswith("admin_html_delete_page_"):
-        page = int(data.rsplit("_", 1)[-1])
-        await _show_html_list(query, "delete", page)
-        return
-
-    if data.startswith("admin_html_delete_"):
-        item_id = int(data.rsplit("_", 1)[-1])
-
-        db = load_html_db()
-        item = db.get("items", {}).get(str(item_id))
-
-        if not item:
-            await query.answer(
-                "❌ جزوه پیدا نشد.",
-                show_alert=True
-            )
-            return
-
-        context.user_data["html_delete_confirm"] = item_id
-
-        await query.message.edit_text(
-            "⚠️ <b>تأیید حذف</b>\n\n"
-            f"📚 {html.escape(item['name'])}\n"
-            f"🔗 {html.escape(item['url'])}\n\n"
-            "آیا مطمئن هستید؟",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "✅ بله، حذف کن",
-                        callback_data=(
-                            f"admin_html_confirm_delete_{item_id}"
-                        )
-                    ),
-                    InlineKeyboardButton(
-                        "❌ لغو",
-                        callback_data="admin_html_delete"
-                    )
-                ]
-            ])
-        )
-        return
-
-    if data.startswith("admin_html_confirm_delete_"):
-        item_id = int(data.rsplit("_", 1)[-1])
-
-        db = load_html_db()
-        item = db.get("items", {}).pop(str(item_id), None)
-
-        if not item:
-            await query.message.edit_text(
-                "❌ جزوه پیدا نشد.",
-                reply_markup=html_admin_keyboard()
-            )
-            return
-
-        shutil.rmtree(
-            os.path.join(HTML_ROOT, str(item_id)),
-            ignore_errors=True
-        )
-
-        try:
-            os.remove(
-                os.path.join(
-                    HTML_ROOT,
-                    f"{item_id}.zip"
-                )
-            )
-        except FileNotFoundError:
-            pass
-
-        save_html_db(db)
-
-        reason = (
-            "🗑 <b>حذف جزوه HTML</b>\n"
-            f"📚 نام: {html.escape(item['name'])}\n"
-            f"🔢 ID: <code>{item_id}</code>\n"
-            f"🔗 لینک قبلی: {html.escape(item['url'])}"
-        )
-
-        backup_html_database(
-            query.from_user,
-            reason
-        )
-
-        await query.message.edit_text(
-            "✅ جزوه حذف شد.\n\n"
-            f"📚 {html.escape(item['name'])}",
-            parse_mode="HTML",
-            reply_markup=html_admin_keyboard()
-        )
-        return
-
-    # ---------------- حذف همه ----------------
-    if data == "admin_html_delete_all":
-        db = load_html_db()
-        items = list(db.get("items", {}).values())
-
-        if not items:
-            await query.answer(
-                "📭 چیزی برای حذف وجود ندارد.",
-                show_alert=True
-            )
-            return
-
-        await query.message.edit_text(
-            f"⚠️ <b>حذف همه جزوه‌های HTML</b>\n\n"
-            f"تعداد: {len(items)}\n"
-            "این عملیات قابل بازگشت نیست.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "🔥 بله، همه را حذف کن",
-                        callback_data="admin_html_confirm_delete_all"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "❌ لغو",
-                        callback_data="admin_html_panel"
-                    )
-                ]
-            ])
-        )
-        return
-
-    if data == "admin_html_confirm_delete_all":
-        db = load_html_db()
-        items = list(db.get("items", {}).values())
-
-        if not items:
-            await query.message.edit_text(
-                "📭 چیزی برای حذف وجود ندارد.",
-                reply_markup=html_admin_keyboard()
-            )
-            return
-
-        names = [
-            f"• {item.get('name', 'بدون نام')} "
-            f"(ID: {item.get('id')})"
-            for item in items
-        ]
-
-        db["items"] = {}
-        save_html_db(db)
-
-        for item in items:
-            item_id = item.get("id")
-            shutil.rmtree(
-                os.path.join(HTML_ROOT, str(item_id)),
-                ignore_errors=True
-            )
-
-            try:
-                os.remove(
-                    os.path.join(
-                        HTML_ROOT,
-                        f"{item_id}.zip"
-                    )
-                )
-            except FileNotFoundError:
-                pass
-
-        reason = (
-            "🔥 <b>حذف همه جزوه‌های HTML</b>\n\n"
-            + "\n".join(names)
-        )
-
-        backup_html_database(
-            query.from_user,
-            reason
-        )
-
-        await query.message.edit_text(
-            "✅ همه جزوه‌های HTML حذف شدند.",
-            reply_markup=html_admin_keyboard()
-        )
-        return
-
-    # ---------------- دریافت بکاپ ----------------
-    if data == "admin_html_get_backup":
-        try:
-            _build_backup_zip()
-
-            with open(
-                HTML_BACKUP_FILE,
-                "rb"
-            ) as f:
-                data_bytes = f.read()
-
-            await query.message.reply_document(
-                document=io.BytesIO(data_bytes),
-                filename="html_backup.zip",
-                caption="📦 بکاپ کامل جزوه‌های HTML"
-            )
-
-        except Exception as e:
-            await query.message.reply_text(
-                f"❌ خطا در ساخت بکاپ:\n{e}"
-            )
-        return
-
-    # ---------------- وارد کردن بکاپ ----------------
-    if data == "admin_html_import_backup":
-        context.user_data["html_waiting"] = "backup"
-
-        await query.message.reply_text(
-            "📥 فایل <code>html_backup.zip</code> را بفرستید.\n"
-            "برای لغو: /cancel",
-            parse_mode="HTML"
-        )
-        return
-
-
-async def html_receive_backup(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if context.user_data.get("html_waiting") != "backup":
-        return
-
-    if not _is_admin(update.effective_user.id):
-        return
-
-    document = update.message.document
-
-    if not document:
-        return
-
-    if not (document.file_name or "").lower().endswith(".zip"):
-        await update.message.reply_text(
-            "❌ فقط html_backup.zip را بفرستید."
-        )
-        raise ApplicationHandlerStop
-
-    try:
-        tg_file = await document.get_file()
-        data = bytes(
-            await tg_file.download_as_bytearray()
-        )
-
-        with zipfile.ZipFile(
-            io.BytesIO(data),
-            "r"
-        ) as zf:
-
-            if "html_database.json" not in zf.namelist():
-                raise ValueError(
-                    "html_database.json داخل بکاپ نیست."
-                )
-
-        with open(HTML_BACKUP_FILE, "wb") as f:
-            f.write(data)
-
-        if not restore_html_database():
-            raise ValueError(
-                "بازیابی بکاپ انجام نشد."
-            )
-
-        reason = (
-            "♻️ <b>جایگزینی HTML BACKUP</b>\n"
-            "ادمین یک بکاپ جدید را وارد و جایگزین کرد."
-        )
-
-        backup_html_database(
-            update.effective_user,
-            reason
-        )
-
-        await update.message.reply_text(
-            "✅ بکاپ HTML با موفقیت جایگزین شد."
-        )
-
-    except Exception as e:
-        print("❌ HTML backup import error:", repr(e))
-        await update.message.reply_text(
-            f"❌ خطا در وارد کردن بکاپ:\n{e}"
-        )
-
-    finally:
-        context.user_data.pop("html_waiting", None)
-
-    raise ApplicationHandlerStop
-
-
-# =========================================================
-# WEB ROUTE
-# =========================================================
-
-async def html_page_handler(request):
-    item_id = request.match_info.get("item_id", "")
-    relative = request.match_info.get("path", "") or "index.html"
-
-    if not item_id.isdigit():
-        return web.Response(status=404, text="Not found")
-
-    db = load_html_db()
-
-    item = db.get("items", {}).get(str(int(item_id)))
-
+        zip_id = int(request.match_info["zip_id"])
+    except (TypeError, ValueError):
+        raise web.HTTPNotFound(text="Not found")
+
+    db = _load_db()
+    item = db.get("zips", {}).get(str(zip_id))
     if not item:
-        return web.Response(
-            status=404,
-            text="جزوه پیدا نشد."
-        )
+        raise web.HTTPNotFound(text="HTML not found")
 
-    root = os.path.abspath(
-        os.path.join(HTML_ROOT, str(int(item_id)))
+    try:
+        render_root = HTML_ROOT / "rendered" / str(zip_id)
+        if not render_root.exists():
+            _extract_for_serving(zip_id)
+
+        requested = request.match_info.get("path", "")
+        # If no path is supplied, use the index directory recorded at import time.
+        if not requested:
+            index_dir = item.get("index_dir", "")
+            if index_dir in {"", "."}:
+                file_path = render_root / "index.html"
+            else:
+                file_path = render_root / index_dir / "index.html"
+        else:
+            # A URL such as /html/12/assets/app.js.
+            requested = requested.lstrip("/")
+            file_path = render_root / requested
+
+        # Prevent traversal after resolution.
+        resolved_root = render_root.resolve()
+        resolved = file_path.resolve()
+        if resolved != resolved_root and resolved_root not in resolved.parents:
+            raise web.HTTPForbidden(text="Forbidden")
+        if not resolved.exists() or not resolved.is_file():
+            raise web.HTTPNotFound(text="File not found")
+
+        return web.FileResponse(resolved)
+    except web.HTTPException:
+        raise
+    except Exception:
+        log.exception("HTML render failed for %s", zip_id)
+        raise web.HTTPInternalServerError(text="HTML render error")
+
+
+# ---------------------------------------------------------------------------
+# Integration helpers
+# ---------------------------------------------------------------------------
+
+
+def get_html_admin_keyboard():
+    """Keyboard button to add to main's admin access panel."""
+    return InlineKeyboardButton("🧩 مدیریت HTML", callback_data="html_manage")
+
+
+def build_html_conversation_handler():
+    return ConversationHandler(
+        entry_points=[CommandHandler("html", html_command)],
+        states={
+            HTML_WAIT_ZIP: [
+                CommandHandler("cancel", html_cancel),
+                MessageHandler(filters.Document.ALL, html_receive_zip),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, html_receive_zip),
+            ],
+            HTML_WAIT_NAME: [
+                CommandHandler("cancel", html_cancel),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, html_receive_name),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", html_cancel)],
+        allow_reentry=True,
+        name="html_upload_conversation",
+        persistent=False,
     )
 
-    relative = relative.replace("\\", "/").lstrip("/")
 
-    if ".." in Path(relative).parts:
-        return web.Response(status=403, text="Forbidden")
-
-    file_path = os.path.abspath(
-        os.path.join(root, relative)
-    )
-
-    if not (
-        file_path == root
-        or file_path.startswith(root + os.sep)
-    ):
-        return web.Response(status=403, text="Forbidden")
-
-    if os.path.isdir(file_path):
-        file_path = os.path.join(file_path, "index.html")
-
-    if not os.path.isfile(file_path):
-        # برای SPAها می‌توان اینجا fallback کرد؛ فعلاً 404 امن‌تر است.
-        return web.Response(
-            status=404,
-            text="فایل موردنظر پیدا نشد."
-        )
-
-    return web.FileResponse(file_path)
+def build_html_callback_handler():
+    return CallbackQueryHandler(html_admin_callback, pattern=r"^html_")
 
 
-def register_html_routes(webapp):
-    # /html/12/  و /html/12/assets/app.js
-    webapp.router.add_get(
-        "/html/{item_id}/{path:.*}",
-        html_page_handler
+def build_html_backup_message_handler():
+    return MessageHandler(
+        (filters.Document.ALL | (filters.TEXT & ~filters.COMMAND)),
+        html_receive_backup,
     )
 
 
-# =========================================================
-# STARTUP RESTORE
-# =========================================================
-
-def restore_html_on_startup():
-    """
-    اگر فایل محلی HTML DB وجود ندارد، آخرین backup را از Telegram می‌گیرد.
-    اگر وجود دارد، آن را دست نمی‌زند.
-    """
-    if os.path.exists(HTML_DB_FILE):
-        try:
-            db = load_html_db()
-            if db.get("items"):
-                print(
-                    f"✅ Local HTML DB loaded: "
-                    f"{len(db['items'])} items"
-                )
-                return True
-        except Exception:
-            pass
-
-    print("🔄 Restoring HTML database from Telegram...")
-    return restore_html_database()
+def html_state_exists():
+    db = _load_db()
+    return bool(db.get("zips"))
