@@ -1455,10 +1455,12 @@ def get_admin_access_inline_keyboard():
             InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")
         ],
         [
+            InlineKeyboardButton("🧩 مدیریت HTML", callback_data="html_manage")
+        ],
+        [
             InlineKeyboardButton("📤 دریافت userdata", callback_data="admin_get_userdata"),
             InlineKeyboardButton("📥 وارد کردن userdata", callback_data="admin_import_userdata")
         ],
-        
         [
             InlineKeyboardButton("🕊 ویرایش پیام استارت", callback_data="admin_edit_start_page"),
             InlineKeyboardButton("❌ بستن پنل", callback_data="admin_close")
