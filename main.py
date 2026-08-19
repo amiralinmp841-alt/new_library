@@ -52,7 +52,7 @@ from telegram.ext import (
 from smart_search import smart_search
 from miniapp import miniapp_data, miniapp_file
 from html_manager import (
-    configure_html_services,
+    #configure_html_services,
     html_command,
     html_cancel,
     html_receive_zip,
@@ -6382,27 +6382,30 @@ async def main():
     # آماده‌سازی HTML Manager
     # ==========================================
 
-    print("🔄 Waiting for Telethon...")
+    #print("🔄 Waiting for Telethon...")
 
-    telethon_ready.wait(timeout=30)
+    #telethon_ready.wait(timeout=30)
 
-    if not telethon_ready.is_set():
-        print("⚠️ Telethon is not ready.")
-    else:
-        print("✅ Telethon ready for HTML Manager.")
+    #if not telethon_ready.is_set():
+    #    print("⚠️ Telethon is not ready.")
+    #else:
+    #    print("✅ Telethon ready for HTML Manager.")
 
-    configure_html_services(
-        telethon_client,
-        run_telethon
-    )
+    #configure_html_services(
+    #    telethon_client,
+    #    run_telethon
+    #)
 
     # ==========================================
-    # بازیابی آخرین بکاپ HTML در صورت نیاز
+    # بازیابی آخرین بکاپ HTML
     # ==========================================
 
     restore_html_on_startup()
 
     # ==========================================
+    # Telegram Application
+    # ==========================================
+
     tg_app = build_application()
     await tg_app.initialize()
     #await tg_app.start()
@@ -6417,7 +6420,11 @@ async def main():
         ],
         drop_pending_updates=True,
     )
-    # aiohttp web app برای Health check و Webhook
+
+    # ==========================================
+    # AIOHTTP
+    # ==========================================
+
     webapp = web.Application()
     webapp["tg"] = tg_app
 
@@ -6428,7 +6435,9 @@ async def main():
     webapp.router.add_get("/health", health)
     webapp.router.add_post(f"/{TOKEN}", webhook_handler)
 
-    # ================= MINI APP =================
+    # ==========================================
+    # MINI APP
+    # ==========================================
 
     static_html = os.path.join(
         os.path.dirname(__file__),
@@ -6453,10 +6462,16 @@ async def main():
         miniapp_file
     )
 
-    # ==================== HTML FILE SERVER ====================
+    # ==========================================
+    # HTML HOSTING
+    # ==========================================
+
     register_html_routes(webapp)
     
-    # ==========================================================
+    # ==========================================
+    # SERVER
+    # ==========================================
+    
     runner = web.AppRunner(webapp)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
