@@ -13,15 +13,6 @@ import uuid
 import zipfile
 import html
 from datetime import datetime
-from html import escape
-import copy
-from flask import Flask
-import threading
-import asyncio
-from aiohttp import web
-import requests
-from telethon import TelegramClient
-from telethon.sessions import StringSession
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -37,6 +28,7 @@ from telegram import (
     MessageReactionUpdated,
     WebAppInfo
 )
+
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -49,22 +41,30 @@ from telegram.ext import (
     MessageReactionHandler
 )
 
+import copy
+from flask import Flask
+import threading
+import asyncio
+from aiohttp import web
+import requests
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 from smart_search import smart_search
+from html import escape
+from telegram.ext import MessageReactionHandler
+from telegram import MessageReactionUpdated
 from miniapp import miniapp_data, miniapp_file
+
 from html_manager import (
-    #configure_html_services,
-    html_command,
-    html_cancel,
-    html_receive_zip,
-    html_receive_name,
-    html_receive_backup,
-    html_admin_callback,
-    register_html_routes,
-    restore_html_on_startup,
-    HTML_WAITING_ZIP,
-    HTML_WAITING_NAME,
-    HTML_WAITING_BACKUP,
+    configure_html_manager,
+    restore_latest_html_backup,
+    build_html_conversation_handler,
+    build_html_callback_handler,
+    build_html_backup_message_handler,
+    get_html_admin_keyboard,
+    html_http_handler,
 )
+
 def delete_node_recursive(db, node_id):
     # اگر نود وجود نداشت
     if node_id not in db:
@@ -114,9 +114,7 @@ if not ADMIN_IDS:
     print("Error: ADMIN_IDS not set in environment variables.")
     exit(1)
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-MINIAPP_URL = f"{WEBHOOK_URL}/miniapp"
-HTML_BASE_URL = f"{WEBHOOK_URL}/html"
+MINIAPP_URL = os.getenv("MINIAPP_URL", "https://YOUR-APP.onrender.com/miniapp")
 HTML_BACKUP_CHAT_ID = int(os.getenv("HTML_BACKUP_CHAT_ID", "0"))
 
 # فایل دیتابیس
@@ -1455,12 +1453,6 @@ def get_admin_access_inline_keyboard():
         [
             InlineKeyboardButton("👑 مدیریت ادمین‌ها", callback_data="admin_mgmt"),
             InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")
-        ],
-        [
-            InlineKeyboardButton(
-                "🌐 مدیریت HTML",
-                callback_data="admin_html_panel"
-            )
         ],
         [
             InlineKeyboardButton("📤 دریافت userdata", callback_data="admin_get_userdata"),
@@ -3388,14 +3380,6 @@ async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("⛔️ شما دسترسی ادمین ندارید.", show_alert=True)
         return CHOOSING
 
-    # ==========================================
-    # HTML MANAGER
-    # ==========================================
-    if data.startswith("admin_html"):
-        return await html_admin_callback(
-            update,
-            context
-        )
     # ---------------- پنل اصلی ادمین ----------------
     if data == "admin_access":
         context.user_data["admin_panel"] = "access"
@@ -6200,7 +6184,22 @@ def build_application():
     application.add_handler(CommandHandler("6", set_row_count), group=0)
     application.add_handler(CommandHandler("style", set_custom_layout), group=0)
     application.add_handler(CommandHandler("miniapp", miniapp_command), group=0)
+# ================= HTML MANAGER =================
 
+    application.add_handler(
+        build_html_conversation_handler(),
+        group=1,
+    )
+    
+    application.add_handler(
+        build_html_callback_handler(),
+        group=1,
+    )
+    
+    application.add_handler(
+        build_html_backup_message_handler(),
+        group=0,
+    )
     
     application.add_handler(
         MessageReactionHandler(handle_reaction, message_reaction_types=MessageReactionHandler.MESSAGE_REACTION), 
@@ -6219,10 +6218,7 @@ def build_application():
     )
 
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("html", html_command)
-        ],
+        entry_points=[CommandHandler("start", start)],
         states={
             CHOOSING: [
                 CommandHandler("report", report_page),
@@ -6319,24 +6315,6 @@ def build_application():
             WAITING_CHAT_MESSAGE: [
                 CommandHandler("cancel", cancel),
                 MessageHandler(filters.ALL & (~filters.COMMAND), receive_chat_message),
-            ],
-            # ==========================================
-            # HTML MANAGER
-            # ==========================================
-            HTML_WAITING_ZIP: [
-                CommandHandler("cancel", html_cancel), 
-                MessageHandler(filters.Document.ALL, html_receive_zip)
-            ],
-            
-            HTML_WAITING_NAME: [
-                CommandHandler("cancel", html_cancel),
-            
-                MessageHandler(filters.TEXT & (~filters.COMMAND), html_receive_name)
-            ],
-            
-            HTML_WAITING_BACKUP: [
-                CommandHandler("cancel", html_cancel),
-                MessageHandler(filters.Document.ALL, html_receive_backup)
             ]
         },
         fallbacks=[
@@ -6378,33 +6356,24 @@ async def webhook_handler(request):
 # ================= MAIN ================
 async def main():
 
-    # ==========================================
-    # آماده‌سازی HTML Manager
-    # ==========================================
+    configure_html_manager(
+        admin_ids=ADMIN_IDS,
+        get_userdata=load_userdata,
+        upload_file_to_telegram=upload_file_to_telegram,
+        download_latest_file_from_telegram=download_latest_file_from_telegram,
+        run_telethon=run_telethon,
+        telethon_client=telethon_client,
+    )
 
-    #print("🔄 Waiting for Telethon...")
-
-    #telethon_ready.wait(timeout=30)
-
-    #if not telethon_ready.is_set():
-    #    print("⚠️ Telethon is not ready.")
-    #else:
-    #    print("✅ Telethon ready for HTML Manager.")
-
-    #configure_html_services(
-    #    telethon_client,
-    #    run_telethon
-    #)
-
-    # ==========================================
-    # بازیابی آخرین بکاپ HTML
-    # ==========================================
-
-    restore_html_on_startup()
-
-    # ==========================================
-    # Telegram Application
-    # ==========================================
+    # HTML state: آخرین بکاپ موجود در گروه HTML BACKUP را برگردان
+    try:
+        restored = restore_latest_html_backup()
+        if restored:
+            print("✅ Latest HTML backup restored from Telegram")
+        else:
+            print("ℹ️ No HTML backup restored; local HTML state will be used/created")
+    except Exception as e:
+        print(f"⚠️ HTML startup restore failed: {e}")
 
     tg_app = build_application()
     await tg_app.initialize()
@@ -6420,11 +6389,7 @@ async def main():
         ],
         drop_pending_updates=True,
     )
-
-    # ==========================================
-    # AIOHTTP
-    # ==========================================
-
+    # aiohttp web app برای Health check و Webhook
     webapp = web.Application()
     webapp["tg"] = tg_app
 
@@ -6435,9 +6400,7 @@ async def main():
     webapp.router.add_get("/health", health)
     webapp.router.add_post(f"/{TOKEN}", webhook_handler)
 
-    # ==========================================
-    # MINI APP
-    # ==========================================
+    # ================= MINI APP =================
 
     static_html = os.path.join(
         os.path.dirname(__file__),
@@ -6461,17 +6424,20 @@ async def main():
         "/miniapp-file",
         miniapp_file
     )
-
-    # ==========================================
-    # HTML HOSTING
-    # ==========================================
-
-    register_html_routes(webapp)
+    # ================= HTML ZIP RENDERER =================
     
-    # ==========================================
-    # SERVER
-    # ==========================================
+    webapp.router.add_get(
+        "/html/{zip_id}",
+        html_http_handler,
+    )
     
+    webapp.router.add_get(
+        "/html/{zip_id}/{path:.*}",
+        html_http_handler,
+    )
+    
+    # ====================
+
     runner = web.AppRunner(webapp)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
